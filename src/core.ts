@@ -68,6 +68,8 @@ export interface Model {
 export type Msg =
   | { readonly kind: "tick"; readonly nowMs: number }
   | { readonly kind: "refresh_tick"; readonly nowMs: number }
+  | { readonly kind: "timer_fired"; readonly nowMs: number }
+  | { readonly kind: "refresh_fired"; readonly nowMs: number }
   | { readonly kind: "refresh_requested" }
   | { readonly kind: "fetched"; readonly result: FetchOneResult }
   | { readonly kind: "fetch_failed"; readonly error: Uint8Array }
@@ -116,6 +118,8 @@ export type Msg =
 export const viewUnbound = [
   "tick",
   "refresh_tick",
+  "timer_fired",
+  "refresh_fired",
   "fetched",
   "fetch_failed",
   "secret_claude",
@@ -607,6 +611,10 @@ function emptyDraft(model: Model): Model {
 
 export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
   switch (msg.kind) {
+    case "timer_fired":
+      return [model, Cmd.now("tick")];
+    case "refresh_fired":
+      return [model, Cmd.now("refresh_tick")];
     case "tick": {
       const nowMs = msg.nowMs >= 0 && msg.nowMs <= 9007199254740991 ? Math.trunc(msg.nowMs) : 0;
       const next = { ...model, nowMs: nowMs };
@@ -856,11 +864,11 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
 
 export function subscriptions(model: Model): Sub<Msg> {
   if (!model.compactOpen && !model.dashboardOpen && !model.settingsOpen) {
-    return Sub.timer("refresh", model.refreshIntervalSec * 1000, "refresh_tick");
+    return Sub.timer("refresh", model.refreshIntervalSec * 1000, "refresh_fired");
   }
   return Sub.batch([
-    Sub.timer("clock", 15000, "tick"),
-    Sub.timer("refresh", model.refreshIntervalSec * 1000, "refresh_tick"),
+    Sub.timer("clock", 15000, "timer_fired"),
+    Sub.timer("refresh", model.refreshIntervalSec * 1000, "refresh_fired"),
   ]);
 }
 
