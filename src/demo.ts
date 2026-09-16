@@ -1,15 +1,23 @@
 // デモ用フィクスチャ。ネットワークなしで 7 カードの見た目を確認する。
+// i64 スロットはリテラルか、比較で狭めたあとの Math.trunc だけを載せる。
 
 import { asciiBytes, utf8Bytes } from "@native-sdk/core";
-import { asWhole } from "./format.ts";
 import { type ProviderId, type ProviderState, type QuotaWindow } from "./snapshot.ts";
 
+function resetMs(nowMs: number, extraMs: number): number {
+  if (nowMs >= 0 && nowMs <= 9007199254740991) return Math.trunc(nowMs) + extraMs;
+  return extraMs;
+}
+
 function bar(id: number, title: string, used: number, resetsAtMs: number): QuotaWindow {
+  const safeId = id >= 0 && id <= 100 ? Math.trunc(id) : 0;
+  const safeUsed = used >= 0 && used <= 100 ? Math.trunc(used) : used > 100 ? 100 : 0;
+  const safeReset = resetsAtMs >= 0 && resetsAtMs <= 9007199254740991 ? Math.trunc(resetsAtMs) : 0;
   return {
-    id: asWhole(id),
+    id: safeId,
     title: asciiBytes(title),
-    usedPercent: asWhole(used),
-    resetsAtMs: asWhole(resetsAtMs),
+    usedPercent: safeUsed,
+    resetsAtMs: safeReset,
   };
 }
 
@@ -20,9 +28,10 @@ function ready(
   account: string,
   windows: readonly QuotaWindow[],
 ): ProviderState {
+  const safeSlot = slot >= 0 && slot <= 6 ? Math.trunc(slot) : 0;
   return {
     id: id,
-    slot: asWhole(slot),
+    slot: safeSlot,
     enabled: true,
     source: "auto",
     status: "ready",
@@ -39,9 +48,12 @@ function ready(
 
 /** nowMs 基準でリセット時刻を載せる。初回 tick 後に呼ぶ。 */
 export function demoProviders(nowMs: number): readonly ProviderState[] {
-  const sessionReset = nowMs + 2 * 3600 * 1000 + 14 * 60 * 1000;
-  const weeklyReset = nowMs + 3 * 24 * 3600 * 1000;
-  const monthReset = nowMs + 12 * 24 * 3600 * 1000;
+  const sessionExtra = 2 * 3600 * 1000 + 14 * 60 * 1000;
+  const weeklyExtra = 3 * 24 * 3600 * 1000;
+  const monthExtra = 12 * 24 * 3600 * 1000;
+  const sessionReset = resetMs(nowMs, sessionExtra);
+  const weeklyReset = resetMs(nowMs, weeklyExtra);
+  const monthReset = resetMs(nowMs, monthExtra);
   return [
     ready("claude", 0, "Pro", "claude-code", [
       bar(1, "Session", 32, sessionReset),
@@ -75,10 +87,29 @@ function emptyDemoWindows(): readonly QuotaWindow[] {
   return items;
 }
 
-export function emptyProvider(id: ProviderId, slot: number, enabled: boolean): ProviderState {
+function slotOf(id: ProviderId): number {
+  switch (id) {
+    case "claude":
+      return 0;
+    case "codex":
+      return 1;
+    case "cursor":
+      return 2;
+    case "antigravity":
+      return 3;
+    case "gemini":
+      return 4;
+    case "opencode":
+      return 5;
+    case "alibaba":
+      return 6;
+  }
+}
+
+export function emptyProvider(id: ProviderId, enabled: boolean): ProviderState {
   return {
     id: id,
-    slot: asWhole(slot),
+    slot: slotOf(id),
     enabled: enabled,
     source: "auto",
     status: "idle",

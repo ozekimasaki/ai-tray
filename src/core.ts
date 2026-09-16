@@ -20,13 +20,11 @@ import {
 import { usageFetchOne } from "@native-sdk/services";
 import { demoProviders, emptyProvider } from "./demo.ts";
 import {
-  clampPercent,
   formatAgo,
   formatReset,
   intervalLabel,
   leftLabel,
   permilleFraction,
-  asWhole,
 } from "./format.ts";
 import type {
   AuthSource,
@@ -156,13 +154,13 @@ export const viewUnbound = [
 
 export function initialModel(): [Model, Cmd<Msg>] {
   const providers: ProviderState[] = [
-    emptyProvider("claude", 0, true),
-    emptyProvider("codex", 1, true),
-    emptyProvider("cursor", 2, true),
-    emptyProvider("antigravity", 3, true),
-    emptyProvider("gemini", 4, true),
-    emptyProvider("opencode", 5, true),
-    emptyProvider("alibaba", 6, true),
+    emptyProvider("claude", true),
+    emptyProvider("codex", true),
+    emptyProvider("cursor", true),
+    emptyProvider("antigravity", true),
+    emptyProvider("gemini", true),
+    emptyProvider("opencode", true),
+    emptyProvider("alibaba", true),
   ];
   return [
     {
@@ -287,11 +285,15 @@ function barTone(usedPercent: number): QuotaTone {
 function toModelWindows(bundle: QuotaWindows): readonly QuotaWindow[] {
   const out: QuotaWindow[] = [];
   for (const w of bundle.items) {
+    const id = w.id >= 0 && w.id <= 9007199254740991 ? Math.trunc(w.id) : 0;
+    const usedRaw = w.usedPercent;
+    const usedPercent = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
+    const resetsAtMs = w.resetsAtMs >= 0 && w.resetsAtMs <= 9007199254740991 ? Math.trunc(w.resetsAtMs) : 0;
     out.push({
-      id: asWhole(w.id),
+      id: id,
       title: w.title,
-      usedPercent: asWhole(w.usedPercent),
-      resetsAtMs: asWhole(w.resetsAtMs),
+      usedPercent: usedPercent,
+      resetsAtMs: resetsAtMs,
     });
   }
   return out;
@@ -300,9 +302,10 @@ function toModelWindows(bundle: QuotaWindows): readonly QuotaWindow[] {
 function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBar[] {
   const out: CardBar[] = [];
   for (const w of windows) {
-    const used = clampPercent(w.usedPercent);
+    const usedRaw = w.usedPercent;
+    const used = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
     out.push({
-      id: asWhole(w.id),
+      id: w.id,
       title: w.title,
       usedPercent: used,
       usedFraction: permilleFraction(used * 10),
@@ -468,6 +471,9 @@ function markLoadingFailed(model: Model, text: Uint8Array): Model {
 }
 
 function applyFetch(model: Model, result: FetchOneResult): Model {
+  const fetchedAtMs = result.fetchedAtMs >= 0 && result.fetchedAtMs <= 9007199254740991
+    ? Math.trunc(result.fetchedAtMs)
+    : 0;
   return patchProvider(model, result.id, (p) => {
     if (result.ok) {
       return {
@@ -478,7 +484,7 @@ function applyFetch(model: Model, result: FetchOneResult): Model {
         windows: toModelWindows(result.windows),
         errorKind: "none",
         errorText: EMPTY,
-        fetchedAtMs: asWhole(result.fetchedAtMs),
+        fetchedAtMs: fetchedAtMs,
         stale: false,
       };
     }
@@ -491,7 +497,7 @@ function applyFetch(model: Model, result: FetchOneResult): Model {
       status: status,
       errorKind: result.errorKind,
       errorText: result.errorText,
-      fetchedAtMs: asWhole(result.fetchedAtMs),
+      fetchedAtMs: fetchedAtMs,
       stale: stale,
       plan: result.plan.length === 0 ? p.plan : result.plan,
       account: result.account.length === 0 ? p.account : result.account,
@@ -508,7 +514,7 @@ function fetchReq(model: Model, id: ProviderId, secret: Uint8Array): FetchOneReq
     source: source,
     region: model.alibabaRegion,
     secret: secret,
-        nowMs: asWhole(model.nowMs),
+    nowMs: model.nowMs,
   };
 }
 
@@ -564,12 +570,14 @@ function emptyDraft(model: Model): Model {
 export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
   switch (msg.kind) {
     case "tick": {
-      const next = { ...model, nowMs: asWhole(msg.nowMs) };
+      const nowMs = msg.nowMs >= 0 && msg.nowMs <= 9007199254740991 ? Math.trunc(msg.nowMs) : 0;
+      const next = { ...model, nowMs: nowMs };
       if (model.demoMode && model.lastRefreshMs === 0) return applyDemo(next);
       return next;
     }
     case "refresh_tick": {
-      const next = { ...model, nowMs: asWhole(msg.nowMs) };
+      const nowMs = msg.nowMs >= 0 && msg.nowMs <= 9007199254740991 ? Math.trunc(msg.nowMs) : 0;
+      const next = { ...model, nowMs: nowMs };
       if (next.demoMode) {
         if (next.lastRefreshMs === 0) return applyDemo(next);
         return { ...next, lastRefreshMs: next.nowMs };
@@ -657,11 +665,13 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [model, usageFetchOne(fetchReq(model, "alibaba", new Uint8Array(0)), { key: "fetch-alibaba", ok: "fetched", err: "fetch_failed" })];
     }
     case "toggle_provider": {
-      const next = persistable(patchSlot(model, asWhole(msg.slot), (p) => ({ ...p, enabled: !p.enabled })));
+      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      const next = persistable(patchSlot(model, slot, (p) => ({ ...p, enabled: !p.enabled })));
       return [next, Cmd.persist()];
     }
     case "cycle_source": {
-      const next = persistable(patchSlot(model, asWhole(msg.slot), (p) => ({ ...p, source: nextSource(p.source) })));
+      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      const next = persistable(patchSlot(model, slot, (p) => ({ ...p, source: nextSource(p.source) })));
       return [next, Cmd.persist()];
     }
     case "cycle_region": {
@@ -698,10 +708,12 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return { ...model, settingsOpen: false };
     case "quit":
       return [model, Cmd.quitApp()];
-    case "focus_secret":
-      return { ...model, credSlot: asWhole(msg.slot), secretNotice: EMPTY };
+    case "focus_secret": {
+      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      return { ...model, credSlot: slot, secretNotice: EMPTY };
+    }
     case "clear_secret": {
-      const slot = asWhole(msg.slot);
+      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
       const next = persistable(
         patchSlot({ ...model, credSlot: slot }, slot, (p) => ({ ...p, credentialPresent: false })),
       );
@@ -737,11 +749,17 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       const applied = applyTextInputEvent(current, msg.edit, MAX_SECRET);
       const nextState = applied ?? applyTextInputEvent(current, clampedInsertEvent(current, msg.edit, MAX_SECRET) ?? msg.edit, MAX_SECRET);
       if (nextState === null) return model;
+      const credAnchor = nextState.selection.anchor >= 0 && nextState.selection.anchor <= 9007199254740991
+        ? Math.trunc(nextState.selection.anchor)
+        : 0;
+      const credFocus = nextState.selection.focus >= 0 && nextState.selection.focus <= 9007199254740991
+        ? Math.trunc(nextState.selection.focus)
+        : 0;
       return {
         ...model,
         credBytes: nextState.text,
-        credAnchor: asWhole(nextState.selection.anchor),
-        credFocus: asWhole(nextState.selection.focus),
+        credAnchor: credAnchor,
+        credFocus: credFocus,
       };
     }
     case "save_secret": {
@@ -832,8 +850,9 @@ function menuRow(
   command: string,
   separator: boolean,
 ): StatusItemState["items"][number] {
+  const safeId = id >= 0 && id <= 100 ? Math.trunc(id) : 0;
   return {
-    id: asWhole(id),
+    id: safeId,
     label: separator ? EMPTY : asciiBytes(label),
     command: separator ? EMPTY : asciiBytes(command),
     separator: separator,
@@ -851,9 +870,10 @@ export function statusItem(model: Model): StatusItemState {
   for (const c of cards) {
     if (c.status !== "ready") continue;
     for (const b of c.bars) {
-      const used = clampPercent(b.usedPercent);
+      const usedRaw = b.usedPercent;
+      const used = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
       const left = used >= 100 ? 0 : 100 - used;
-      if (left < best) best = asWhole(left);
+      if (left < best) best = left >= 0 && left <= 100 ? Math.trunc(left) : 0;
     }
   }
   const title = best > 100 ? asciiBytes("QB") : asciiBytes(`${best}%`);
