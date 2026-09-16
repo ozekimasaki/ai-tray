@@ -13,6 +13,13 @@ export function concat3(a: Uint8Array, b: Uint8Array, c: Uint8Array): Uint8Array
   return concat2(concat2(a, b), c);
 }
 
+/** NaN を落として i64 スロットへ載せる。比較後に trunc する。 */
+export function asWhole(n: number): number {
+  if (n > 0) return Math.trunc(n);
+  if (n < 0) return Math.trunc(n);
+  return 0;
+}
+
 /** 正の整数除算。ホスト時刻のような f64 でも整数ステップで割る。 */
 export function intDiv(n: number, d: number): number {
   if (d <= 0) return 0;
@@ -28,13 +35,14 @@ export function intDiv(n: number, d: number): number {
     r -= step;
     q += count;
   }
-  return q;
+  return asWhole(q);
 }
 
 export function clampPercent(n: number): number {
-  if (n < 0) return 0;
-  if (n > 100) return 100;
-  return intDiv(n, 1);
+  const whole = asWhole(n);
+  if (whole > 100) return 100;
+  if (whole < 0) return 0;
+  return whole;
 }
 
 /** permille (0..1000) を 0..1 の fraction にする。progress 用。 */

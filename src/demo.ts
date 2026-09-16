@@ -1,14 +1,15 @@
 // デモ用フィクスチャ。ネットワークなしで 7 カードの見た目を確認する。
 
 import { asciiBytes, utf8Bytes } from "@native-sdk/core";
+import { asWhole } from "./format.ts";
 import { type ProviderId, type ProviderState, type QuotaWindow } from "./snapshot.ts";
 
 function bar(id: number, title: string, used: number, resetsAtMs: number): QuotaWindow {
   return {
-    id: id,
+    id: asWhole(id),
     title: asciiBytes(title),
-    usedPercent: used,
-    resetsAtMs: resetsAtMs,
+    usedPercent: asWhole(used),
+    resetsAtMs: asWhole(resetsAtMs),
   };
 }
 
@@ -21,7 +22,7 @@ function ready(
 ): ProviderState {
   return {
     id: id,
-    slot: slot,
+    slot: asWhole(slot),
     enabled: true,
     source: "auto",
     status: "ready",
@@ -77,7 +78,7 @@ function emptyDemoWindows(): readonly QuotaWindow[] {
 export function emptyProvider(id: ProviderId, slot: number, enabled: boolean): ProviderState {
   return {
     id: id,
-    slot: slot,
+    slot: asWhole(slot),
     enabled: enabled,
     source: "auto",
     status: "idle",

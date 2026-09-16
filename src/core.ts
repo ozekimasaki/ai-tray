@@ -26,6 +26,7 @@ import {
   intervalLabel,
   leftLabel,
   permilleFraction,
+  asWhole,
 } from "./format.ts";
 import type {
   AuthSource,
@@ -287,10 +288,10 @@ function toModelWindows(bundle: QuotaWindows): readonly QuotaWindow[] {
   const out: QuotaWindow[] = [];
   for (const w of bundle.items) {
     out.push({
-      id: w.id,
+      id: asWhole(w.id),
       title: w.title,
-      usedPercent: w.usedPercent,
-      resetsAtMs: w.resetsAtMs,
+      usedPercent: asWhole(w.usedPercent),
+      resetsAtMs: asWhole(w.resetsAtMs),
     });
   }
   return out;
@@ -301,7 +302,7 @@ function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBa
   for (const w of windows) {
     const used = clampPercent(w.usedPercent);
     out.push({
-      id: w.id,
+      id: asWhole(w.id),
       title: w.title,
       usedPercent: used,
       usedFraction: permilleFraction(used * 10),
@@ -477,7 +478,7 @@ function applyFetch(model: Model, result: FetchOneResult): Model {
         windows: toModelWindows(result.windows),
         errorKind: "none",
         errorText: EMPTY,
-        fetchedAtMs: result.fetchedAtMs,
+        fetchedAtMs: asWhole(result.fetchedAtMs),
         stale: false,
       };
     }
@@ -490,7 +491,7 @@ function applyFetch(model: Model, result: FetchOneResult): Model {
       status: status,
       errorKind: result.errorKind,
       errorText: result.errorText,
-      fetchedAtMs: result.fetchedAtMs,
+      fetchedAtMs: asWhole(result.fetchedAtMs),
       stale: stale,
       plan: result.plan.length === 0 ? p.plan : result.plan,
       account: result.account.length === 0 ? p.account : result.account,
@@ -507,7 +508,7 @@ function fetchReq(model: Model, id: ProviderId, secret: Uint8Array): FetchOneReq
     source: source,
     region: model.alibabaRegion,
     secret: secret,
-    nowMs: model.nowMs,
+        nowMs: asWhole(model.nowMs),
   };
 }
 
@@ -563,12 +564,12 @@ function emptyDraft(model: Model): Model {
 export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
   switch (msg.kind) {
     case "tick": {
-      const next = { ...model, nowMs: msg.nowMs };
+      const next = { ...model, nowMs: asWhole(msg.nowMs) };
       if (model.demoMode && model.lastRefreshMs === 0) return applyDemo(next);
       return next;
     }
     case "refresh_tick": {
-      const next = { ...model, nowMs: msg.nowMs };
+      const next = { ...model, nowMs: asWhole(msg.nowMs) };
       if (next.demoMode) {
         if (next.lastRefreshMs === 0) return applyDemo(next);
         return { ...next, lastRefreshMs: next.nowMs };
@@ -656,11 +657,11 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [model, usageFetchOne(fetchReq(model, "alibaba", new Uint8Array(0)), { key: "fetch-alibaba", ok: "fetched", err: "fetch_failed" })];
     }
     case "toggle_provider": {
-      const next = persistable(patchSlot(model, msg.slot, (p) => ({ ...p, enabled: !p.enabled })));
+      const next = persistable(patchSlot(model, asWhole(msg.slot), (p) => ({ ...p, enabled: !p.enabled })));
       return [next, Cmd.persist()];
     }
     case "cycle_source": {
-      const next = persistable(patchSlot(model, msg.slot, (p) => ({ ...p, source: nextSource(p.source) })));
+      const next = persistable(patchSlot(model, asWhole(msg.slot), (p) => ({ ...p, source: nextSource(p.source) })));
       return [next, Cmd.persist()];
     }
     case "cycle_region": {
@@ -698,30 +699,31 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
     case "quit":
       return [model, Cmd.quitApp()];
     case "focus_secret":
-      return { ...model, credSlot: msg.slot, secretNotice: EMPTY };
+      return { ...model, credSlot: asWhole(msg.slot), secretNotice: EMPTY };
     case "clear_secret": {
+      const slot = asWhole(msg.slot);
       const next = persistable(
-        patchSlot({ ...model, credSlot: msg.slot }, msg.slot, (p) => ({ ...p, credentialPresent: false })),
+        patchSlot({ ...model, credSlot: slot }, slot, (p) => ({ ...p, credentialPresent: false })),
       );
-      if (msg.slot === 0) {
+      if (slot === 0) {
         return [next, Cmd.credentials.delete("claude.session", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
-      if (msg.slot === 1) {
+      if (slot === 1) {
         return [next, Cmd.credentials.delete("codex.token", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
-      if (msg.slot === 2) {
+      if (slot === 2) {
         return [next, Cmd.credentials.delete("cursor.cookie", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
-      if (msg.slot === 3) {
+      if (slot === 3) {
         return [next, Cmd.credentials.delete("antigravity.token", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
-      if (msg.slot === 4) {
+      if (slot === 4) {
         return [next, Cmd.credentials.delete("gemini.token", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
-      if (msg.slot === 5) {
+      if (slot === 5) {
         return [next, Cmd.credentials.delete("opencode.api", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
-      if (msg.slot === 6) {
+      if (slot === 6) {
         return [next, Cmd.credentials.delete("alibaba.api", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
       return next;
@@ -738,8 +740,8 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return {
         ...model,
         credBytes: nextState.text,
-        credAnchor: nextState.selection.anchor,
-        credFocus: nextState.selection.focus,
+        credAnchor: asWhole(nextState.selection.anchor),
+        credFocus: asWhole(nextState.selection.focus),
       };
     }
     case "save_secret": {
@@ -831,7 +833,7 @@ function menuRow(
   separator: boolean,
 ): StatusItemState["items"][number] {
   return {
-    id: id,
+    id: asWhole(id),
     label: separator ? EMPTY : asciiBytes(label),
     command: separator ? EMPTY : asciiBytes(command),
     separator: separator,
@@ -851,7 +853,7 @@ export function statusItem(model: Model): StatusItemState {
     for (const b of c.bars) {
       const used = clampPercent(b.usedPercent);
       const left = used >= 100 ? 0 : 100 - used;
-      if (left < best) best = left;
+      if (left < best) best = asWhole(left);
     }
   }
   const title = best > 100 ? asciiBytes("QB") : asciiBytes(`${best}%`);
