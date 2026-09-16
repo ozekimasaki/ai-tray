@@ -14,6 +14,7 @@ import type {
 import { resolve } from "./paths.ts";
 
 const EMPTY = new Uint8Array(0);
+// 公開リポジトリには実クライアントを載せない。Gemini CLI の refresh が必要なら手元で埋める。
 const GEMINI_CLIENT_ID = "";
 const GEMINI_CLIENT_SECRET = "";
 
