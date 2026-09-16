@@ -1,7 +1,7 @@
 // コアとサービスが共有する境界型。秘密バイトは Model に残さない。
 // Model に載せるレコードは interface（参照）。サービス境界は type エイリアス。
 
-/** 監視する 7 プロバイダ。並びはカード表示順。 */
+/** 監視する 8 プロバイダ。並びはカード表示順。kie は slot 7。 */
 export type ProviderId =
   | "claude"
   | "codex"
@@ -9,7 +9,8 @@ export type ProviderId =
   | "antigravity"
   | "gemini"
   | "opencode"
-  | "alibaba";
+  | "alibaba"
+  | "kie";
 
 /** 資格情報の取り方。auto はファイル→手動の順。 */
 export type AuthSource = "auto" | "oauth" | "cli" | "cookie" | "api";
@@ -34,12 +35,14 @@ export type PathResult = {
 
 export type QuotaTone = "normal" | "warning" | "destructive";
 
-/** quota 1 本。usedPercent は 0..100 の整数。resetsAtMs が 0 なら不明。 */
+/** quota 1 本。usedPercent は 0..100。isCount なら remaining が残高で usedPercent は 0。 */
 export interface QuotaWindow {
   readonly id: number;
   readonly title: Uint8Array;
   readonly usedPercent: number;
   readonly resetsAtMs: number;
+  readonly isCount: boolean;
+  readonly remaining: number;
 }
 
 /** サービス境界用。配列は named record で包む。 */
@@ -48,6 +51,8 @@ export type ServiceWindow = {
   readonly title: Uint8Array;
   readonly usedPercent: number;
   readonly resetsAtMs: number;
+  readonly isCount: boolean;
+  readonly remaining: number;
 };
 
 export type QuotaWindows = {
@@ -98,6 +103,8 @@ export interface CardBar {
   readonly leftLabel: Uint8Array;
   readonly resetLabel: Uint8Array;
   readonly tone: QuotaTone;
+  readonly isCount: boolean;
+  readonly remaining: number;
 }
 
 /** カード横断のバー行。ネスト each が使えないので slot で絞る。 */
@@ -110,6 +117,8 @@ export interface FlatBar {
   readonly leftLabel: Uint8Array;
   readonly resetLabel: Uint8Array;
   readonly tone: QuotaTone;
+  readonly isCount: boolean;
+  readonly remaining: number;
 }
 
 export interface CardView {

@@ -1,8 +1,8 @@
-// デモ用フィクスチャ。ネットワークなしで 7 カードの見た目を確認する。
+// デモ用フィクスチャ。ネットワークなしで 8 カードの見た目を確認する。
 // i64 スロットはリテラルか、比較で狭めたあとの Math.trunc だけを載せる。
 
 import { asciiBytes, utf8Bytes } from "@native-sdk/core";
-import { type ProviderId, type ProviderState, type QuotaWindow } from "./snapshot.ts";
+import { type AuthSource, type ProviderId, type ProviderState, type QuotaWindow } from "./snapshot.ts";
 
 function resetMs(nowMs: number, extraMs: number): number {
   if (nowMs >= 0 && nowMs <= 9007199254740991) return Math.trunc(nowMs) + extraMs;
@@ -18,6 +18,21 @@ function bar(id: number, title: string, used: number, resetsAtMs: number): Quota
     title: asciiBytes(title),
     usedPercent: safeUsed,
     resetsAtMs: safeReset,
+    isCount: false,
+    remaining: 0,
+  };
+}
+
+function countBar(id: number, title: string, remaining: number): QuotaWindow {
+  const safeId = id >= 0 && id <= 100 ? Math.trunc(id) : 0;
+  const safeRemaining = remaining >= 0 && remaining <= 9007199254740991 ? Math.trunc(remaining) : 0;
+  return {
+    id: safeId,
+    title: asciiBytes(title),
+    usedPercent: 0,
+    resetsAtMs: 0,
+    isCount: true,
+    remaining: safeRemaining,
   };
 }
 
@@ -27,13 +42,14 @@ function ready(
   plan: string,
   account: string,
   windows: readonly QuotaWindow[],
+  source: AuthSource,
 ): ProviderState {
-  const safeSlot = slot >= 0 && slot <= 6 ? Math.trunc(slot) : 0;
+  const safeSlot = slot >= 0 && slot <= 7 ? Math.trunc(slot) : 0;
   return {
     id: id,
     slot: safeSlot,
     enabled: true,
-    source: "auto",
+    source: source,
     status: "ready",
     account: utf8Bytes(account),
     plan: asciiBytes(plan),
@@ -58,27 +74,28 @@ export function demoProviders(nowMs: number): readonly ProviderState[] {
     ready("claude", 0, "Pro", "claude-code", [
       bar(1, "Session", 32, sessionReset),
       bar(2, "Weekly", 18, weeklyReset),
-    ]),
+    ], "auto"),
     ready("codex", 1, "Plus", "chatgpt", [
       bar(1, "Primary", 71, sessionReset),
       bar(2, "Secondary", 24, weeklyReset),
-    ]),
+    ], "auto"),
     ready("cursor", 2, "Pro", "cursor-app", [
       bar(1, "Plan", 44, monthReset),
       bar(2, "Cursor", 12, monthReset),
       bar(3, "Grok Bot", 18, weeklyReset),
-    ]),
-    ready("antigravity", 3, "Google", "agy", [bar(1, "Weekly", 27, weeklyReset)]),
-    ready("gemini", 4, "Free", "gemini-cli", [bar(1, "Daily", 55, sessionReset)]),
+    ], "auto"),
+    ready("antigravity", 3, "Google", "agy", [bar(1, "Weekly", 27, weeklyReset)], "auto"),
+    ready("gemini", 4, "Free", "gemini-cli", [bar(1, "Daily", 55, sessionReset)], "auto"),
     ready("opencode", 5, "Zen", "opencode", [
       bar(1, "Session", 9, sessionReset),
       bar(2, "Weekly", 41, weeklyReset),
-    ]),
+    ], "auto"),
     ready("alibaba", 6, "Coding Plan", "intl", [
       bar(1, "Session", 22, sessionReset),
       bar(2, "Weekly", 61, weeklyReset),
       bar(3, "Monthly", 14, monthReset),
-    ]),
+    ], "auto"),
+    ready("kie", 7, "Credits", "kie.ai", [countBar(1, "Credits", 128)], "api"),
   ];
 }
 
@@ -103,17 +120,20 @@ function slotOf(id: ProviderId): number {
       return 5;
     case "alibaba":
       return 6;
+    case "kie":
+      return 7;
   }
 }
 
 export function emptyProvider(id: ProviderId, enabled: boolean): ProviderState {
   const rawSlot = slotOf(id);
-  const slot = rawSlot >= 0 && rawSlot <= 6 ? Math.trunc(rawSlot) : 0;
+  const slot = rawSlot >= 0 && rawSlot <= 7 ? Math.trunc(rawSlot) : 0;
+  const source: AuthSource = id === "kie" ? "api" : "auto";
   return {
     id: id,
     slot: slot,
     enabled: enabled,
-    source: "auto",
+    source: source,
     status: "idle",
     account: asciiBytes(""),
     plan: asciiBytes(""),
@@ -134,4 +154,5 @@ export const PROVIDER_ORDER: readonly ProviderId[] = [
   "gemini",
   "opencode",
   "alibaba",
+  "kie",
 ];

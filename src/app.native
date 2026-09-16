@@ -44,16 +44,31 @@
                     <text grow="1">{b.title}</text>
                     <text>{b.leftLabel}</text>
                   </row>
-                  <progress value="{b.usedFraction}" label="{b.title}"/>
-                  <if test="{b.tone == 'destructive'}">
-                    <text foreground="destructive">{b.resetLabel}</text>
-                  </if>
-                  <else>
-                    <if test="{b.tone == 'warning'}">
-                      <text foreground="warning">{b.resetLabel}</text>
+                  <if test="{b.isCount}">
+                    <if test="{b.tone == 'destructive'}">
+                      <text foreground="destructive">{b.resetLabel}</text>
                     </if>
                     <else>
-                      <text foreground="text_muted">{b.resetLabel}</text>
+                      <if test="{b.tone == 'warning'}">
+                        <text foreground="warning">{b.resetLabel}</text>
+                      </if>
+                      <else>
+                        <text foreground="text_muted">{b.resetLabel}</text>
+                      </else>
+                    </else>
+                  </if>
+                  <else>
+                    <progress value="{b.usedFraction}" label="{b.title}"/>
+                    <if test="{b.tone == 'destructive'}">
+                      <text foreground="destructive">{b.resetLabel}</text>
+                    </if>
+                    <else>
+                      <if test="{b.tone == 'warning'}">
+                        <text foreground="warning">{b.resetLabel}</text>
+                      </if>
+                      <else>
+                        <text foreground="text_muted">{b.resetLabel}</text>
+                      </else>
                     </else>
                   </else>
                 </column>

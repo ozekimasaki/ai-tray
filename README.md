@@ -1,6 +1,6 @@
 # QuotaBar
 
-Windows 向けのトレイ常駐 AI 利用量モニタです。Claude / Codex / Cursor / Antigravity / Gemini / OpenCode / Alibaba Coding Plan の 7 ソースを、ローカル CLI セッション・手動 Cookie・API キーから読みます。エンジンは [Native SDK](https://github.com/vercel-labs/native)（Zig + TypeScript コア、WebView なし）です。
+Windows 向けのトレイ常駐 AI 利用量モニタです。Claude / Codex / Cursor / Antigravity / Gemini / OpenCode / Alibaba Coding Plan / Kie の 8 ソースを、ローカル CLI セッション・手動 Cookie・API キーから読みます。エンジンは [Native SDK](https://github.com/vercel-labs/native)（Zig + TypeScript コア、WebView なし）です。
 
 画面の文言は英語です。同梱フォントは Geist Regular / Geist Mono だけで、CJK グリフが無いため日本語を置くと tofu になります。
 
@@ -11,6 +11,7 @@ Windows 向けのトレイ常駐 AI 利用量モニタです。Claude / Codex / 
 - Compact / Dashboard / Settings の 3 窓
 - 初回は Demo data（ネットワークなし）。Settings で切ると実データを取る
 - Cursor カードの追加バー **Grok Bot**（`get-sand-usage-status`。xAI 単体課金ではない）
+- Kie カードは残クレジット整数（`GET api.kie.ai/api/v1/chat/credit`。上限が無いのでプログレスバーは出さない）
 
 対象外: ブラウザ Cookie の自動復号、コストログ、マルチアカウント、Alibaba Token Plan、xAI 単体の Grok。
 
@@ -43,7 +44,7 @@ native dev
 
 ## 使い方
 
-1. 起動すると compact 窓に 7 枚の Demo カードが出ます。
+1. 起動すると compact 窓に 8 枚の Demo カードが出ます。
 2. Settings でプロバイダの ON/OFF、ソース（auto / oauth / cli / cookie / api）、Alibaba の intl/cn、更新間隔を変えます。
 3. Demo data を切ると、次の Refresh でローカル資格情報を読みます。
 4. API キーや Cookie は Settings の secret 欄へ。OS の Credential Manager に入り、persist には乗りません。
@@ -60,6 +61,7 @@ native dev
 | Gemini | `~/.gemini/oauth_creds.json`。期限切れは Gemini CLI の公開クライアントで refresh。個人向け廃止は Antigravity へ誘導 | — |
 | OpenCode | なし | Zen API キー、または opencode.ai の Cookie |
 | Alibaba | なし | Model Studio API キー優先、次にコンソール Cookie。Region で intl/cn |
+| Kie | なし | kie.ai API キー。`GET /api/v1/chat/credit` の残クレジット（パーセント枠ではない。リセットなし） |
 
 Cursor の Grok Bot は usage-summary のあとに best-effort で `POST https://cursor.com/api/dashboard/get-sand-usage-status` します。失敗しても Plan / Cursor バーは残します。
 
@@ -83,7 +85,7 @@ Windows でトレイ常駐にするには、パッケージ後にアプリを起
 - カードは半透明ベール
 - フォントが Geist
 - 文言が英語で tofu が無い
-- Demo 7 カード、全オフの空状態、Settings の Preview error state
+- Demo 8 カード、全オフの空状態、Settings の Preview error state
 - Settings でプロバイダを消すと compact から消える
 - Close でプロセスが死なない（hide）。終了は Quit
 
@@ -102,4 +104,4 @@ native dev
 - `src/app.native` — compact
 - `src/windows/dashboard.native` / `settings.native`
 - `src/services/usage.ts` — `fetchOne`（同期。curl / sqlite3 / agy）
-- `src/demo.ts` — デモ 7 カード
+- `src/demo.ts` — デモ 8 カード

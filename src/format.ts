@@ -87,6 +87,12 @@ export function leftLabel(usedPercent: number): Uint8Array {
   return asciiBytes(`${percentLeft(usedPercent)}% left`);
 }
 
+/** 残高整数のラベル。上限が無いのでパーセントにしない。 */
+export function creditsLabel(remaining: number): Uint8Array {
+  const n = remaining >= 0 && remaining <= 9007199254740991 ? Math.trunc(remaining) : 0;
+  return asciiBytes(`${n} credits`);
+}
+
 export function intervalLabel(sec: number): Uint8Array {
   return asciiBytes(`Every ${sec}s`);
 }

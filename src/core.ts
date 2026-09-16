@@ -24,6 +24,7 @@ import {
   formatReset,
   intervalLabel,
   leftLabel,
+  creditsLabel,
   permilleFraction,
 } from "./format.ts";
 import type {
@@ -87,6 +88,8 @@ export type Msg =
   | { readonly kind: "miss_opencode"; readonly reason: Uint8Array }
   | { readonly kind: "secret_alibaba"; readonly secret: Uint8Array }
   | { readonly kind: "miss_alibaba"; readonly reason: Uint8Array }
+  | { readonly kind: "secret_kie"; readonly secret: Uint8Array }
+  | { readonly kind: "miss_kie"; readonly reason: Uint8Array }
   | { readonly kind: "toggle_provider"; readonly slot: number }
   | { readonly kind: "cycle_source"; readonly slot: number }
   | { readonly kind: "cycle_region" }
@@ -136,6 +139,8 @@ export const viewUnbound = [
   "miss_opencode",
   "secret_alibaba",
   "miss_alibaba",
+  "secret_kie",
+  "miss_kie",
   "secret_saved",
   "secret_failed",
   "secret_cleared",
@@ -166,6 +171,7 @@ export function initialModel(): [Model, Cmd<Msg>] {
     emptyProvider("gemini", true),
     emptyProvider("opencode", true),
     emptyProvider("alibaba", true),
+    emptyProvider("kie", true),
   ];
   return [
     {
@@ -205,6 +211,8 @@ function providerName(id: ProviderId): Uint8Array {
       return asciiBytes("OpenCode");
     case "alibaba":
       return asciiBytes("Alibaba");
+    case "kie":
+      return asciiBytes("Kie");
   }
 }
 
@@ -239,6 +247,8 @@ function missingHint(id: ProviderId): Uint8Array {
       return asciiBytes("Paste an OpenCode API key or site cookie in Settings");
     case "alibaba":
       return asciiBytes("Paste a Model Studio API key or console cookie in Settings");
+    case "kie":
+      return asciiBytes("Paste a kie.ai API key in Settings");
   }
 }
 
@@ -258,6 +268,8 @@ function settingsHint(id: ProviderId): Uint8Array {
       return asciiBytes("API key hits zen usage. Cookie hits the OpenCode subscription page.");
     case "alibaba":
       return asciiBytes("API key first, cookie second. Cycle region for intl vs cn.");
+    case "kie":
+      return asciiBytes("API key hits GET api.kie.ai/api/v1/chat/credit. Remaining credits, no reset.");
   }
 }
 
@@ -299,6 +311,12 @@ function barTone(usedPercent: number): QuotaTone {
   return "normal";
 }
 
+function countTone(remaining: number): QuotaTone {
+  if (remaining <= 0) return "destructive";
+  if (remaining < 20) return "warning";
+  return "normal";
+}
+
 function toModelWindows(bundle: QuotaWindows): readonly QuotaWindow[] {
   const out: QuotaWindow[] = [];
   for (const w of bundle.items) {
@@ -306,11 +324,14 @@ function toModelWindows(bundle: QuotaWindows): readonly QuotaWindow[] {
     const usedRaw = w.usedPercent;
     const usedPercent = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
     const resetsAtMs = w.resetsAtMs >= 0 && w.resetsAtMs <= 9007199254740991 ? Math.trunc(w.resetsAtMs) : 0;
+    const remaining = w.remaining >= 0 && w.remaining <= 9007199254740991 ? Math.trunc(w.remaining) : 0;
     out.push({
       id: id,
       title: w.title,
       usedPercent: usedPercent,
       resetsAtMs: resetsAtMs,
+      isCount: w.isCount,
+      remaining: remaining,
     });
   }
   return out;
@@ -319,17 +340,34 @@ function toModelWindows(bundle: QuotaWindows): readonly QuotaWindow[] {
 function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBar[] {
   const out: CardBar[] = [];
   for (const w of windows) {
-    const usedRaw = w.usedPercent;
-    const used = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
-    out.push({
-      id: w.id,
-      title: w.title,
-      usedPercent: used,
-      usedFraction: permilleFraction(used * 10),
-      leftLabel: leftLabel(used),
-      resetLabel: formatReset(nowMs, w.resetsAtMs),
-      tone: barTone(used),
-    });
+    if (w.isCount) {
+      const remaining = w.remaining >= 0 && w.remaining <= 9007199254740991 ? Math.trunc(w.remaining) : 0;
+      out.push({
+        id: w.id,
+        title: w.title,
+        usedPercent: 0,
+        usedFraction: 0,
+        leftLabel: creditsLabel(remaining),
+        resetLabel: asciiBytes("No reset"),
+        tone: countTone(remaining),
+        isCount: true,
+        remaining: remaining,
+      });
+    } else {
+      const usedRaw = w.usedPercent;
+      const used = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
+      out.push({
+        id: w.id,
+        title: w.title,
+        usedPercent: used,
+        usedFraction: permilleFraction(used * 10),
+        leftLabel: leftLabel(used),
+        resetLabel: formatReset(nowMs, w.resetsAtMs),
+        tone: barTone(used),
+        isCount: false,
+        remaining: 0,
+      });
+    }
   }
   return out;
 }
@@ -376,6 +414,7 @@ export function visibleBars(model: Model): readonly FlatBar[] {
     for (const b of c.bars) {
       const raw = c.slot * 10 + b.id;
       const id = raw >= 0 && raw <= 1000 ? Math.trunc(raw) : 0;
+      const remaining = b.remaining >= 0 && b.remaining <= 9007199254740991 ? Math.trunc(b.remaining) : 0;
       out.push({
         id: id,
         slot: c.slot,
@@ -385,6 +424,8 @@ export function visibleBars(model: Model): readonly FlatBar[] {
         leftLabel: b.leftLabel,
         resetLabel: b.resetLabel,
         tone: b.tone,
+        isCount: b.isCount,
+        remaining: remaining,
       });
     }
   }
@@ -575,6 +616,13 @@ function persistable(model: Model): Model {
 }
 
 function sanitizeRestored(model: Model): Model {
+  let hasKie = false;
+  for (const p of model.providers) {
+    if (p.id === "kie") hasKie = true;
+  }
+  const withKie: ProviderState[] = [];
+  for (const p of model.providers) withKie.push(p);
+  if (!hasKie) withKie.push(emptyProvider("kie", true));
   return {
     ...model,
     nowMs: 0,
@@ -586,7 +634,7 @@ function sanitizeRestored(model: Model): Model {
     credAnchor: 0,
     credFocus: 0,
     secretNotice: EMPTY,
-    providers: mapProviders(model, (p) => ({
+    providers: mapProviders({ ...model, providers: withKie }, (p) => ({
       ...p,
       status: "idle",
       account: EMPTY,
@@ -639,6 +687,7 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
           Cmd.credentials.get("gemini.token", { key: "cred-gemini", ok: "secret_gemini", err: "miss_gemini" }),
           Cmd.credentials.get("opencode.api", { key: "cred-opencode", ok: "secret_opencode", err: "miss_opencode" }),
           Cmd.credentials.get("alibaba.api", { key: "cred-alibaba", ok: "secret_alibaba", err: "miss_alibaba" }),
+          Cmd.credentials.get("kie.api", { key: "cred-kie", ok: "secret_kie", err: "miss_kie" }),
         ]),
       ];
     }
@@ -711,13 +760,22 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       if (!providerEnabled(model, "alibaba")) return model;
       return [model, usageFetchOne(fetchReq(model, "alibaba", new Uint8Array(0)), { key: "fetch-alibaba", ok: "fetched", err: "fetch_failed" })];
     }
+    case "secret_kie": {
+      const next = withPresent(model, "kie", true);
+      if (!providerEnabled(next, "kie")) return next;
+      return [next, usageFetchOne(fetchReq(next, "kie", msg.secret), { key: "fetch-kie", ok: "fetched", err: "fetch_failed" })];
+    }
+    case "miss_kie": {
+      if (!providerEnabled(model, "kie")) return model;
+      return [model, usageFetchOne(fetchReq(model, "kie", new Uint8Array(0)), { key: "fetch-kie", ok: "fetched", err: "fetch_failed" })];
+    }
     case "toggle_provider": {
-      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
       const next = persistable(patchSlot(model, slot, (p) => ({ ...p, enabled: !p.enabled })));
       return [next, Cmd.persist()];
     }
     case "cycle_source": {
-      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
       const next = persistable(patchSlot(model, slot, (p) => ({ ...p, source: nextSource(p.source) })));
       return [next, Cmd.persist()];
     }
@@ -756,11 +814,11 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
     case "quit":
       return [model, Cmd.quitApp()];
     case "focus_secret": {
-      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
       return { ...model, credSlot: slot, secretNotice: EMPTY };
     }
     case "clear_secret": {
-      const slot = msg.slot >= 0 && msg.slot <= 6 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
       const next = persistable(
         patchSlot({ ...model, credSlot: slot }, slot, (p) => ({ ...p, credentialPresent: false })),
       );
@@ -784,6 +842,9 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       }
       if (slot === 6) {
         return [next, Cmd.credentials.delete("alibaba.api", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
+      }
+      if (slot === 7) {
+        return [next, Cmd.credentials.delete("kie.api", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
       return next;
     }
@@ -830,6 +891,9 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       }
       if (model.credSlot === 6) {
         return [model, Cmd.credentials.set("alibaba.api", model.credBytes, { key: "cred-set", ok: "secret_saved", err: "secret_failed" })];
+      }
+      if (model.credSlot === 7) {
+        return [model, Cmd.credentials.set("kie.api", model.credBytes, { key: "cred-set", ok: "secret_saved", err: "secret_failed" })];
       }
       return model;
     }
@@ -917,6 +981,7 @@ export function statusItem(model: Model): StatusItemState {
   for (const c of cards) {
     if (c.status !== "ready") continue;
     for (const b of c.bars) {
+      if (b.isCount) continue;
       const usedRaw = b.usedPercent;
       const used = usedRaw >= 0 && usedRaw <= 100 ? Math.trunc(usedRaw) : usedRaw > 100 ? 100 : 0;
       const left = used >= 100 ? 0 : 100 - used;

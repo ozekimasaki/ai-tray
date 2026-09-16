@@ -1,4 +1,4 @@
-// 7 プロバイダの利用量を同期取得する。throw せず FetchOneResult を返す。
+// 8 プロバイダの利用量を同期取得する。throw せず FetchOneResult を返す。
 
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
@@ -80,6 +80,8 @@ type LooseJson = {
   usage?: LooseJson;
   remaining?: number;
   total?: number;
+  code?: number;
+  msg?: string;
   fiveHour?: LooseWindow;
   week?: LooseWindow;
   month?: LooseWindow;
@@ -207,6 +209,20 @@ function bar(id: number, title: string, used: number, resetsAtMs: number): Quota
     title: encodeText(title),
     usedPercent: clampPercent(used),
     resetsAtMs: resetsAtMs,
+    isCount: false,
+    remaining: 0,
+  };
+}
+
+function countBar(id: number, title: string, remaining: number): QuotaWindow {
+  const safeRemaining = remaining >= 0 && remaining <= 9007199254740991 ? Math.trunc(remaining) : 0;
+  return {
+    id: id,
+    title: encodeText(title),
+    usedPercent: 0,
+    resetsAtMs: 0,
+    isCount: true,
+    remaining: safeRemaining,
   };
 }
 
@@ -770,6 +786,59 @@ function fetchAlibaba(request: FetchOneRequest): FetchOneResult {
   return okResult(request.id, request.nowMs, plan, "Coding Plan", windows);
 }
 
+function kieRemaining(json: LooseJson | null): number {
+  if (json == null) return -1;
+  if (json.remaining != null && json.remaining === json.remaining) {
+    if (json.remaining >= 0 && json.remaining <= 9007199254740991) return Math.trunc(json.remaining);
+    return 0;
+  }
+  return -1;
+}
+
+function fetchKie(request: FetchOneRequest): FetchOneResult {
+  const secret = secretText(request);
+  if (secret.length === 0) {
+    return fail(request.id, request.nowMs, "not_found", "Paste a kie.ai API key in Settings");
+  }
+  const res = http(
+    "GET",
+    "https://api.kie.ai/api/v1/chat/credit",
+    ["Authorization: Bearer " + secret, "Accept: application/json"],
+    "",
+  );
+  if (res.status === 401 || res.status === 403) {
+    return fail(request.id, request.nowMs, "auth", "Auth expired");
+  }
+  if (res.status < 200 || res.status >= 300) {
+    return fail(request.id, request.nowMs, httpKind(res.status), httpErrorText(res.status));
+  }
+  let code = 0;
+  let remaining = -1;
+  try {
+    const parsed = JSON.parse(res.body) as { code?: number; msg?: string; data?: number };
+    if (parsed.code != null && parsed.code === parsed.code) code = parsed.code;
+    if (typeof parsed.data === "number" && parsed.data === parsed.data) {
+      remaining = parsed.data < 0 ? 0 : parsed.data;
+    }
+  } catch {
+    return fail(request.id, request.nowMs, "unknown", "Network error");
+  }
+  if (code === 401 || code === 403) {
+    return fail(request.id, request.nowMs, "auth", "Auth expired");
+  }
+  if (remaining < 0) {
+    remaining = kieRemaining(parseJson(res.body));
+  }
+  if (code !== 200 && code !== 0) {
+    return fail(request.id, request.nowMs, "unknown", "Not found");
+  }
+  if (remaining < 0) {
+    return fail(request.id, request.nowMs, "unknown", "Not found");
+  }
+  const safeRemaining = remaining >= 0 && remaining <= 9007199254740991 ? Math.trunc(remaining) : 0;
+  return okResult(request.id, request.nowMs, "kie.ai", "Credits", [countBar(1, "Credits", safeRemaining)]);
+}
+
 /**
  * @deadlineMs 20000
  */
@@ -782,6 +851,7 @@ export function fetchOne(request: FetchOneRequest): FetchOneResult {
     if (request.id === "antigravity") return fetchAntigravity(request);
     if (request.id === "opencode") return fetchOpenCode(request);
     if (request.id === "alibaba") return fetchAlibaba(request);
+    if (request.id === "kie") return fetchKie(request);
     return fail(request.id, request.nowMs, "unknown", "Not found");
   } catch (e) {
     if (e instanceof Error) {
