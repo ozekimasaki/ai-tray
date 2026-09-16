@@ -100,6 +100,18 @@ export interface CardBar {
   readonly tone: QuotaTone;
 }
 
+/** カード横断のバー行。ネスト each が使えないので slot で絞る。 */
+export interface FlatBar {
+  readonly id: number;
+  readonly slot: number;
+  readonly title: Uint8Array;
+  readonly usedPercent: number;
+  readonly usedFraction: number;
+  readonly leftLabel: Uint8Array;
+  readonly resetLabel: Uint8Array;
+  readonly tone: QuotaTone;
+}
+
 export interface CardView {
   readonly id: number;
   readonly slot: number;

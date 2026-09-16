@@ -33,6 +33,7 @@ import type {
   ErrorKind,
   FetchOneRequest,
   FetchOneResult,
+  FlatBar,
   ProviderId,
   ProviderState,
   ProviderStatus,
@@ -348,6 +349,29 @@ export function visibleCards(model: Model): readonly CardView[] {
 
 export function hasVisibleCards(model: Model): boolean {
   return visibleCards(model).length > 0;
+}
+
+export function visibleBars(model: Model): readonly FlatBar[] {
+  const out: FlatBar[] = [];
+  const cards = visibleCards(model);
+  for (const c of cards) {
+    if (c.status !== "ready") continue;
+    for (const b of c.bars) {
+      const raw = c.slot * 10 + b.id;
+      const id = raw >= 0 && raw <= 1000 ? Math.trunc(raw) : 0;
+      out.push({
+        id: id,
+        slot: c.slot,
+        title: b.title,
+        usedPercent: b.usedPercent,
+        usedFraction: b.usedFraction,
+        leftLabel: b.leftLabel,
+        resetLabel: b.resetLabel,
+        tone: b.tone,
+      });
+    }
+  }
+  return out;
 }
 
 export function updatedLabel(model: Model): Uint8Array {

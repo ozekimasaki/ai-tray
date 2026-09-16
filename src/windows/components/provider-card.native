@@ -25,25 +25,27 @@
             <if test="{c.stale}">
               <badge>Stale</badge>
             </if>
-            <for each="c.bars" key="id" as="b">
-              <column gap="2">
-                <row cross="center" gap="8">
-                  <text grow="1">{b.title}</text>
-                  <text>{b.leftLabel}</text>
-                </row>
-                <progress value="{b.usedFraction}" label="{b.title}"/>
-                <if test="{b.tone == 'destructive'}">
-                  <text foreground="destructive">{b.resetLabel}</text>
-                </if>
-                <else>
-                  <if test="{b.tone == 'warning'}">
-                    <text foreground="warning">{b.resetLabel}</text>
+            <for each="visibleBars" key="id" as="b">
+              <if test="{b.slot == slot}">
+                <column gap="2">
+                  <row cross="center" gap="8">
+                    <text grow="1">{b.title}</text>
+                    <text>{b.leftLabel}</text>
+                  </row>
+                  <progress value="{b.usedFraction}" label="{b.title}"/>
+                  <if test="{b.tone == 'destructive'}">
+                    <text foreground="destructive">{b.resetLabel}</text>
                   </if>
                   <else>
-                    <text foreground="text_muted">{b.resetLabel}</text>
+                    <if test="{b.tone == 'warning'}">
+                      <text foreground="warning">{b.resetLabel}</text>
+                    </if>
+                    <else>
+                      <text foreground="text_muted">{b.resetLabel}</text>
+                    </else>
                   </else>
-                </else>
-              </column>
+                </column>
+              </if>
             </for>
           </if>
           <if test="{c.status == 'idle'}">
