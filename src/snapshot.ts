@@ -14,7 +14,7 @@ export type ProviderId =
 /** 資格情報の取り方。auto はファイル→手動の順。 */
 export type AuthSource = "auto" | "oauth" | "cli" | "cookie" | "api";
 
-export type ProviderStatus = "idle" | "loading" | "ready" | "missing" | "error";
+export type ProviderStatus = "idle" | "loading" | "ready" | "missing" | "failed";
 
 export type ErrorKind = "none" | "auth" | "network" | "not_found" | "migrated" | "unknown";
 

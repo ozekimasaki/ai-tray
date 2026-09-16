@@ -9,7 +9,7 @@
     .permissions = .{ "view", "command", "network", "filesystem", "credentials" },
     .capabilities = .{ "native_views", "gpu_surfaces", "tray", "persist", "credentials" },
     .persist = .{
-        .version = 1,
+        .version = 2,
         .restore = .{
             .ok = "restored",
             .none = "fresh_boot",

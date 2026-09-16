@@ -329,7 +329,7 @@ function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBa
 }
 
 function cardFromProvider(nowMs: number, p: ProviderState, forceError: boolean): CardView {
-  const status: ProviderStatus = forceError && p.status === "ready" ? "error" : p.status;
+  const status: ProviderStatus = forceError && p.status === "ready" ? "failed" : p.status;
   const errorText =
     forceError && p.status === "ready" ? asciiBytes("Auth expired") : p.errorText;
   return {
@@ -472,7 +472,7 @@ function markLoadingFailed(model: Model, text: Uint8Array): Model {
       const stale = p.windows.length > 0;
       return {
         ...p,
-        status: stale ? "error" : "error",
+        status: "failed",
         stale: stale,
         errorKind: "network",
         errorText: text.length === 0 ? asciiBytes("Network error") : text,
@@ -499,7 +499,7 @@ function applyFetch(model: Model, result: FetchOneResult): Model {
     const stale = p.windows.length > 0;
     const status: ProviderStatus = result.errorKind === "not_found" || result.errorKind === "migrated"
       ? "missing"
-      : "error";
+      : "failed";
     return {
       ...p,
       status: status,

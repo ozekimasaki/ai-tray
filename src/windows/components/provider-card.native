@@ -15,7 +15,7 @@
           <if test="{c.status == 'missing'}">
             <text wrap="true" foreground="text_muted">{c.hint}</text>
           </if>
-          <if test="{c.status == 'error'}">
+          <if test="{c.status == 'failed'}">
             <text foreground="destructive" wrap="true">{c.errorText}</text>
             <if test="{c.stale}">
               <text foreground="text_muted">Showing last values</text>
