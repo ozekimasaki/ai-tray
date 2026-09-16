@@ -107,9 +107,11 @@ function slotOf(id: ProviderId): number {
 }
 
 export function emptyProvider(id: ProviderId, enabled: boolean): ProviderState {
+  const rawSlot = slotOf(id);
+  const slot = rawSlot >= 0 && rawSlot <= 6 ? Math.trunc(rawSlot) : 0;
   return {
     id: id,
-    slot: slotOf(id),
+    slot: slot,
     enabled: enabled,
     source: "auto",
     status: "idle",

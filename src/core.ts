@@ -471,10 +471,10 @@ function markLoadingFailed(model: Model, text: Uint8Array): Model {
 }
 
 function applyFetch(model: Model, result: FetchOneResult): Model {
-  const fetchedAtMs = result.fetchedAtMs >= 0 && result.fetchedAtMs <= 9007199254740991
-    ? Math.trunc(result.fetchedAtMs)
-    : 0;
   return patchProvider(model, result.id, (p) => {
+    const fetchedAtMs = result.fetchedAtMs >= 0 && result.fetchedAtMs <= 9007199254740991
+      ? Math.trunc(result.fetchedAtMs)
+      : 0;
     if (result.ok) {
       return {
         ...p,
