@@ -68,8 +68,8 @@ export interface Model {
 export type Msg =
   | { readonly kind: "tick"; readonly nowMs: number }
   | { readonly kind: "refresh_tick"; readonly nowMs: number }
-  | { readonly kind: "timer_fired"; readonly nowMs: number }
-  | { readonly kind: "refresh_fired"; readonly nowMs: number }
+  | { readonly kind: "timer_fired"; readonly atMs: number }
+  | { readonly kind: "refresh_fired"; readonly atMs: number }
   | { readonly kind: "refresh_requested" }
   | { readonly kind: "fetched"; readonly result: FetchOneResult }
   | { readonly kind: "fetch_failed"; readonly error: Uint8Array }
@@ -612,8 +612,10 @@ function emptyDraft(model: Model): Model {
 export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
   switch (msg.kind) {
     case "timer_fired":
+      if (msg.atMs < 0) return model;
       return [model, Cmd.now("tick")];
     case "refresh_fired":
+      if (msg.atMs < 0) return model;
       return [model, Cmd.now("refresh_tick")];
     case "tick": {
       const nowMs = msg.nowMs >= 0 && msg.nowMs <= 9007199254740991 ? Math.trunc(msg.nowMs) : 0;
