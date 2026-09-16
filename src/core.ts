@@ -201,10 +201,6 @@ function providerName(id: ProviderId): Uint8Array {
       return asciiBytes("OpenCode");
     case "alibaba":
       return asciiBytes("Alibaba");
-    default: {
-      const _never: never = id;
-      return asciiBytes("");
-    }
   }
 }
 
@@ -220,10 +216,6 @@ function sourceBadge(source: AuthSource): Uint8Array {
       return asciiBytes("cookie");
     case "api":
       return asciiBytes("api");
-    default: {
-      const _never: never = source;
-      return asciiBytes("");
-    }
   }
 }
 
@@ -243,10 +235,6 @@ function missingHint(id: ProviderId): Uint8Array {
       return asciiBytes("Paste an OpenCode API key or site cookie in Settings");
     case "alibaba":
       return asciiBytes("Paste a Model Studio API key or console cookie in Settings");
-    default: {
-      const _never: never = id;
-      return asciiBytes("");
-    }
   }
 }
 
@@ -266,10 +254,6 @@ function settingsHint(id: ProviderId): Uint8Array {
       return asciiBytes("API key hits zen usage. Cookie hits the OpenCode subscription page.");
     case "alibaba":
       return asciiBytes("API key first, cookie second. Cycle region for intl vs cn.");
-    default: {
-      const _never: never = id;
-      return asciiBytes("");
-    }
   }
 }
 
@@ -285,11 +269,12 @@ function nextSource(source: AuthSource): AuthSource {
       return "api";
     case "api":
       return "auto";
-    default: {
-      const _never: never = source;
-      return "auto";
-    }
   }
+}
+
+function emptyWindows(): readonly QuotaWindow[] {
+  const items: QuotaWindow[] = [];
+  return items;
 }
 
 function barTone(usedPercent: number): QuotaTone {
@@ -557,7 +542,7 @@ function sanitizeRestored(model: Model): Model {
       status: "idle",
       account: EMPTY,
       plan: EMPTY,
-      windows: [],
+      windows: emptyWindows(),
       errorKind: "none",
       errorText: EMPTY,
       fetchedAtMs: 0,
@@ -805,10 +790,6 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [model, Cmd.now("tick")];
     case "restore_failed":
       return [model, Cmd.now("tick")];
-    default: {
-      const _never: never = msg;
-      return model;
-    }
   }
 }
 

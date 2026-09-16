@@ -69,6 +69,11 @@ export function demoProviders(nowMs: number): readonly ProviderState[] {
   ];
 }
 
+function emptyDemoWindows(): readonly QuotaWindow[] {
+  const items: QuotaWindow[] = [];
+  return items;
+}
+
 export function emptyProvider(id: ProviderId, slot: number, enabled: boolean): ProviderState {
   return {
     id: id,
@@ -78,7 +83,7 @@ export function emptyProvider(id: ProviderId, slot: number, enabled: boolean): P
     status: "idle",
     account: asciiBytes(""),
     plan: asciiBytes(""),
-    windows: [],
+    windows: emptyDemoWindows(),
     errorKind: "none",
     errorText: asciiBytes(""),
     fetchedAtMs: 0,
