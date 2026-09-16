@@ -5,7 +5,9 @@
     .description = "Tray-resident AI usage monitor for Claude, Codex, Cursor, Antigravity, Gemini, OpenCode, Alibaba, and Kie.",
     .version = "0.1.0",
     .icons = .{"assets/icon.png"},
-    .platforms = .{ "windows", "linux" },
+    .platforms = .{ "windows", "macos", "linux" },
+    // macOS は LSUIElement。トレイ（NSStatusItem）が復帰手段。Linux は Dock を持たないので無視される。
+    .dock_visible = false,
     .permissions = .{ "view", "command", "network", "filesystem", "credentials" },
     .capabilities = .{ "native_views", "gpu_surfaces", "tray", "persist", "credentials" },
     .persist = .{

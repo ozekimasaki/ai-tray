@@ -26,6 +26,9 @@
       ],
       "package-windows": [
         "native package --target windows"
+      ],
+      "package-macos": [
+        "native package --target macos --signing adhoc --archive"
       ]
     }
   }

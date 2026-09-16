@@ -1,4 +1,4 @@
-// Windows と POSIX の資格情報パス。秘密は返さない。
+// Windows / macOS / Linux の資格情報パス。秘密は返さない。
 
 import { homedir, platform } from "os";
 import { join } from "path";
@@ -16,6 +16,10 @@ function homePath(): string {
 
 function isWindows(): boolean {
   return platform() === "win32";
+}
+
+function isDarwin(): boolean {
+  return platform() === "darwin";
 }
 
 function envValue(name: string): string {
@@ -42,6 +46,18 @@ function cursorPath(): string {
       return join(appData, "Cursor", "User", "globalStorage", "state.vscdb");
     }
     return join(homePath(), "AppData", "Roaming", "Cursor", "User", "globalStorage", "state.vscdb");
+  }
+  // Cursor は XDG ではなく Application Support を使う。XDG_CONFIG_HOME があっても無視する。
+  if (isDarwin()) {
+    return join(
+      homePath(),
+      "Library",
+      "Application Support",
+      "Cursor",
+      "User",
+      "globalStorage",
+      "state.vscdb",
+    );
   }
   const xdg = envValue("XDG_CONFIG_HOME");
   if (xdg.length > 0) {
