@@ -10,7 +10,6 @@
           <text foreground="text_muted">{c.plan}</text>
           <if test="{c.status == 'loading'}">
             <text foreground="text_muted">Fetching...</text>
-            <spinner/>
           </if>
           <if test="{c.status == 'missing'}">
             <text wrap="true" foreground="text_muted">{c.hint}</text>

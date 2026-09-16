@@ -1,9 +1,8 @@
 <!-- プロバイダ ON、ソース、資格情報、間隔、デモ切替。 -->
-<column grow="1" padding="12" main="start">
-  <column background="surface" radius="xl" padding="12" grow="1" gap="8">
+<column grow="1" padding="16" main="start">
+  <column window-drag="true" background="surface" radius="xl" padding="12" grow="1" gap="8">
     <row window-drag="true" gap="4" cross="center">
       <text grow="1"><span weight="medium">Settings</span></text>
-      <button size="sm" variant="ghost" on-press="quit">Quit</button>
       <button size="sm" variant="ghost" icon="x" on-press="hide_settings" label="Close"></button>
     </row>
     <separator/>
@@ -12,7 +11,7 @@
         <column gap="6">
           <text><span weight="medium">Data</span></text>
           <switch checked="{demoMode}" on-toggle="toggle_demo">Demo data</switch>
-          <text foreground="text_muted" wrap="true">Demo paints eight sample cards with no network. Turn it off to read local CLI sessions, cookies, and API keys.</text>
+          <text foreground="text_muted" wrap="true">Demo paints nine sample cards with no network. Turn it off to read local CLI sessions, cookies, and API keys.</text>
           <switch checked="{forceError}" on-toggle="toggle_force_error">Preview error state</switch>
           <row gap="8" cross="center">
             <text grow="1">Refresh interval</text>
@@ -61,6 +60,13 @@
           <if test="{hasSecretNotice}">
             <text foreground="text_muted">{secretNotice}</text>
           </if>
+        </column>
+        <separator/>
+        <column gap="6">
+          <text><span weight="medium">Windows</span></text>
+          <button variant="secondary" on-press="open_dashboard">Open Dashboard</button>
+          <text foreground="text_muted" wrap="true">Dashboard is a wide two-column view. The tray panel is the narrow one-column overlay.</text>
+          <button variant="secondary" on-press="quit">Quit QuotaBar</button>
         </column>
       </column>
     </scroll>

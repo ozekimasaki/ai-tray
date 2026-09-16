@@ -1,4 +1,4 @@
-// デモ用フィクスチャ。ネットワークなしで 8 カードの見た目を確認する。
+// デモ用フィクスチャ。ネットワークなしで 9 カードの見た目を確認する。
 // i64 スロットはリテラルか、比較で狭めたあとの Math.trunc だけを載せる。
 
 import { asciiBytes, utf8Bytes } from "@native-sdk/core";
@@ -44,7 +44,7 @@ function ready(
   windows: readonly QuotaWindow[],
   source: AuthSource,
 ): ProviderState {
-  const safeSlot = slot >= 0 && slot <= 7 ? Math.trunc(slot) : 0;
+  const safeSlot = slot >= 0 && slot <= 8 ? Math.trunc(slot) : 0;
   return {
     id: id,
     slot: safeSlot,
@@ -80,9 +80,9 @@ export function demoProviders(nowMs: number): readonly ProviderState[] {
       bar(2, "Secondary", 24, weeklyReset),
     ], "auto"),
     ready("cursor", 2, "Pro", "cursor-app", [
-      bar(1, "Plan", 44, monthReset),
-      bar(2, "Cursor", 12, monthReset),
-      bar(3, "Grok Bot", 18, weeklyReset),
+      bar(1, "Cursor", 12, monthReset),
+      bar(2, "Other", 44, monthReset),
+      bar(3, "Grok", 18, weeklyReset),
     ], "auto"),
     ready("antigravity", 3, "Google", "agy", [bar(1, "Weekly", 27, weeklyReset)], "auto"),
     ready("gemini", 4, "Free", "gemini-cli", [bar(1, "Daily", 55, sessionReset)], "auto"),
@@ -96,6 +96,10 @@ export function demoProviders(nowMs: number): readonly ProviderState[] {
       bar(3, "Monthly", 14, monthReset),
     ], "auto"),
     ready("kie", 7, "Credits", "kie.ai", [countBar(1, "Credits", 128)], "api"),
+    ready("devin", 8, "Daily/Weekly", "org_demo", [
+      bar(1, "Daily", 22, sessionReset),
+      bar(2, "Weekly", 61, weeklyReset),
+    ], "api"),
   ];
 }
 
@@ -122,13 +126,15 @@ function slotOf(id: ProviderId): number {
       return 6;
     case "kie":
       return 7;
+    case "devin":
+      return 8;
   }
 }
 
 export function emptyProvider(id: ProviderId, enabled: boolean): ProviderState {
   const rawSlot = slotOf(id);
-  const slot = rawSlot >= 0 && rawSlot <= 7 ? Math.trunc(rawSlot) : 0;
-  const source: AuthSource = id === "kie" ? "api" : "auto";
+  const slot = rawSlot >= 0 && rawSlot <= 8 ? Math.trunc(rawSlot) : 0;
+  const source: AuthSource = id === "kie" || id === "devin" ? "api" : "auto";
   return {
     id: id,
     slot: slot,
@@ -155,4 +161,5 @@ export const PROVIDER_ORDER: readonly ProviderId[] = [
   "opencode",
   "alibaba",
   "kie",
+  "devin",
 ];

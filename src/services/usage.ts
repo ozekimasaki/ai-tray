@@ -1,4 +1,4 @@
-// 8 プロバイダの利用量を同期取得する。throw せず FetchOneResult を返す。
+// 9 プロバイダの利用量を同期取得する。throw せず FetchOneResult を返す。
 
 import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
@@ -31,6 +31,8 @@ type LooseWindow = {
   resetInSec?: number;
   used?: number;
   limit?: number;
+  autoPercentUsed?: number;
+  apiPercentUsed?: number;
 };
 
 type LooseJson = {
@@ -58,9 +60,8 @@ type LooseJson = {
   };
   planUsage?: LooseWindow;
   included?: LooseWindow;
-  cursorModels?: LooseWindow;
-  namedModelUsage?: LooseWindow;
-  thirdParty?: LooseWindow;
+  autoModelSelectedDisplayMessage?: string;
+  namedModelSelectedDisplayMessage?: string;
   billingCycleEnd?: string;
   billing_cycle_end?: string;
   usagePercent?: number;
@@ -86,6 +87,11 @@ type LooseJson = {
   fiveHour?: LooseWindow;
   week?: LooseWindow;
   month?: LooseWindow;
+  has_quota_allocation?: boolean;
+  hide_daily_quota?: boolean;
+  overage_balance?: number;
+  daily_quota?: LooseWindow;
+  weekly_quota?: LooseWindow;
 };
 
 type HttpResult = {
@@ -178,6 +184,34 @@ function percentFromWindow(w: LooseWindow | undefined): number {
     return clampPercent((w.used / w.limit) * 100);
   }
   return -1;
+}
+
+/** display message の `%` 直前の数字。正規表現は使わない。 */
+function percentFromDisplayMessage(message: string | undefined): number {
+  if (message == null || message.length === 0) return -1;
+  const bytes = new TextEncoder().encode(message);
+  let pct = -1;
+  let i = 0;
+  while (i < bytes.length) {
+    if (bytes[i] === 37) {
+      pct = i;
+      break;
+    }
+    i = i + 1;
+  }
+  if (pct <= 0) return -1;
+  let start = pct;
+  while (start > 0) {
+    const b = bytes[start - 1];
+    const digit = b >= 48 && b <= 57;
+    const dot = b === 46;
+    if (!digit && !dot) break;
+    start = start - 1;
+  }
+  if (start === pct) return -1;
+  const n = Number(new TextDecoder().decode(bytes.slice(start, pct)));
+  if (n !== n) return -1;
+  return clampPercent(n);
 }
 
 function resetMsFromUnix(raw: number, nowMs: number): number {
@@ -501,12 +535,18 @@ function fetchCursor(request: FetchOneRequest): FetchOneResult {
   const windows: QuotaWindow[] = [];
   const cycle = json.billingCycleEnd ?? json.billing_cycle_end;
   const cycleMs = cycle != null ? parseTimeMs(cycle) : 0;
-  const planPct = percentFromWindow(planWin);
-  if (planPct >= 0) windows.push(bar(1, "Plan", planPct, cycleMs));
-  const cursorPct = percentFromWindow(json.cursorModels ?? json.namedModelUsage);
-  if (cursorPct >= 0) windows.push(bar(2, "Cursor", cursorPct, cycleMs));
-  const thirdPct = percentFromWindow(json.thirdParty);
-  if (thirdPct >= 0) windows.push(bar(3, "Third party", thirdPct, cycleMs));
+  let cursorPct = -1;
+  let otherPct = -1;
+  if (planWin != null && planWin.autoPercentUsed != null) {
+    cursorPct = clampPercent(planWin.autoPercentUsed);
+  }
+  if (planWin != null && planWin.apiPercentUsed != null) {
+    otherPct = clampPercent(planWin.apiPercentUsed);
+  }
+  if (cursorPct < 0) cursorPct = percentFromDisplayMessage(json.autoModelSelectedDisplayMessage);
+  if (otherPct < 0) otherPct = percentFromDisplayMessage(json.namedModelSelectedDisplayMessage);
+  if (cursorPct >= 0) windows.push(bar(1, "Cursor", cursorPct, cycleMs));
+  if (otherPct >= 0) windows.push(bar(2, "Other", otherPct, cycleMs));
   const sand = http("POST", "https://cursor.com/api/dashboard/get-sand-usage-status", headers, "{}");
   if (sand.status >= 200 && sand.status < 300) {
     const sandJson = parseJson(sand.body);
@@ -525,7 +565,7 @@ function fetchCursor(request: FetchOneRequest): FetchOneResult {
         if (!hasTrial && sandJson.nextResetTimestampUtc != null) {
           reset = parseTimeMs(sandJson.nextResetTimestampUtc);
         }
-        windows.push(bar(4, "Grok Bot", sandJson.usagePercent, reset));
+        windows.push(bar(3, "Grok", sandJson.usagePercent, reset));
       }
     }
   }
@@ -796,6 +836,137 @@ function kieRemaining(json: LooseJson | null): number {
   return -1;
 }
 
+function resetMsFromIsoOrUnix(raw: string | number | undefined, nowMs: number): number {
+  if (raw == null) return 0;
+  if (typeof raw === "number") return resetMsFromUnix(raw, nowMs);
+  if (raw.length === 0) return 0;
+  return parseTimeMs(raw);
+}
+
+function stripBearer(token: string): string {
+  const trimmed = token.trim();
+  if (trimmed.length >= 7) {
+    const prefix = trimmed.slice(0, 7).toLowerCase();
+    if (prefix === "bearer ") return trimmed.slice(7).trim();
+  }
+  return trimmed;
+}
+
+function headerLineValue(secret: string, header: string): string {
+  const needle = header.toLowerCase() + ":";
+  const lower = secret.toLowerCase();
+  const idx = lower.indexOf(needle);
+  if (idx < 0) return "";
+  const from = idx + needle.length;
+  const rest = secret.slice(from);
+  const nl = rest.indexOf("\n");
+  const line = nl >= 0 ? rest.slice(0, nl) : rest;
+  return line.trim();
+}
+
+function parseDevinSecret(secret: string): { org: string; token: string } {
+  const fromOrgHeader = headerLineValue(secret, "x-cog-org-id");
+  const fromAuth = stripBearer(headerLineValue(secret, "authorization"));
+  if (fromOrgHeader.length > 0 && fromAuth.length > 0) {
+    return { org: fromOrgHeader, token: fromAuth };
+  }
+  const nl = secret.indexOf("\n");
+  if (nl >= 0) {
+    const first = secret.slice(0, nl).trim();
+    const rest = stripBearer(secret.slice(nl + 1).trim());
+    if (first.length > 0 && rest.length > 0) return { org: first, token: rest };
+  }
+  const trimmed = secret.trim();
+  if (trimmed.indexOf("org_") === 0) {
+    const colon = trimmed.indexOf(":");
+    const space = trimmed.indexOf(" ");
+    let split = -1;
+    if (colon > 0 && (space < 0 || colon < space)) split = colon;
+    else if (space > 0) split = space;
+    if (split > 0) {
+      return { org: trimmed.slice(0, split).trim(), token: stripBearer(trimmed.slice(split + 1).trim()) };
+    }
+  }
+  return { org: "", token: "" };
+}
+
+function fetchDevin(request: FetchOneRequest): FetchOneResult {
+  const parsed = parseDevinSecret(secretText(request));
+  if (parsed.org.length === 0 || parsed.token.length === 0) {
+    return fail(request.id, request.nowMs, "not_found", "Paste org id and Bearer token in Settings");
+  }
+  const url = "https://app.devin.ai/api/" + parsed.org + "/billing/quota/usage";
+  const res = http(
+    "GET",
+    url,
+    [
+      "Authorization: Bearer " + parsed.token,
+      "x-cog-org-id: " + parsed.org,
+      "Accept: application/json",
+    ],
+    "",
+  );
+  if (res.status === 401 || res.status === 403) {
+    return fail(request.id, request.nowMs, "auth", "Auth expired");
+  }
+  if (res.status < 200 || res.status >= 300) {
+    return fail(request.id, request.nowMs, httpKind(res.status), httpErrorText(res.status));
+  }
+  let hasAlloc = true;
+  let hideDaily = false;
+  let overage = 0;
+  let dailyPct = -1;
+  let weeklyPct = -1;
+  let dailyReset = 0;
+  let weeklyReset = 0;
+  try {
+    const parsedJson = JSON.parse(res.body) as {
+      has_quota_allocation?: boolean;
+      hide_daily_quota?: boolean;
+      overage_balance?: number;
+      daily_quota?: { used_percent?: number; reset_at?: string };
+      weekly_quota?: { used_percent?: number; reset_at?: string };
+    };
+    if (parsedJson.has_quota_allocation === false) hasAlloc = false;
+    if (parsedJson.hide_daily_quota === true) hideDaily = true;
+    if (parsedJson.overage_balance != null && parsedJson.overage_balance === parsedJson.overage_balance) {
+      overage = parsedJson.overage_balance < 0 ? 0 : parsedJson.overage_balance;
+    }
+    if (parsedJson.daily_quota != null && parsedJson.daily_quota.used_percent != null) {
+      dailyPct = clampPercent(parsedJson.daily_quota.used_percent);
+      dailyReset = resetMsFromIsoOrUnix(parsedJson.daily_quota.reset_at, request.nowMs);
+    }
+    if (parsedJson.weekly_quota != null && parsedJson.weekly_quota.used_percent != null) {
+      weeklyPct = clampPercent(parsedJson.weekly_quota.used_percent);
+      weeklyReset = resetMsFromIsoOrUnix(parsedJson.weekly_quota.reset_at, request.nowMs);
+    }
+  } catch {
+    const json = parseJson(res.body);
+    if (json == null) return fail(request.id, request.nowMs, "unknown", "Network error");
+    if (json.has_quota_allocation === false) hasAlloc = false;
+    if (json.hide_daily_quota === true) hideDaily = true;
+    if (json.overage_balance != null && json.overage_balance === json.overage_balance) {
+      overage = json.overage_balance < 0 ? 0 : json.overage_balance;
+    }
+    dailyPct = percentFromWindow(json.daily_quota);
+    weeklyPct = percentFromWindow(json.weekly_quota);
+    dailyReset = resetMsFromWindow(json.daily_quota, request.nowMs);
+    weeklyReset = resetMsFromWindow(json.weekly_quota, request.nowMs);
+  }
+  if (!hasAlloc) {
+    return fail(request.id, request.nowMs, "not_found", "No Devin quota for this org");
+  }
+  const windows: QuotaWindow[] = [];
+  if (!hideDaily && dailyPct >= 0) windows.push(bar(1, "Daily", dailyPct, dailyReset));
+  if (weeklyPct >= 0) windows.push(bar(2, "Weekly", weeklyPct, weeklyReset));
+  if (overage > 0) {
+    const safeOverage = overage >= 0 && overage <= 9007199254740991 ? Math.trunc(overage) : 0;
+    windows.push(countBar(3, "Overage", safeOverage));
+  }
+  if (windows.length === 0) return fail(request.id, request.nowMs, "unknown", "Not found");
+  return okResult(request.id, request.nowMs, parsed.org, "Daily/Weekly", windows);
+}
+
 function fetchKie(request: FetchOneRequest): FetchOneResult {
   const secret = secretText(request);
   if (secret.length === 0) {
@@ -853,6 +1024,7 @@ export function fetchOne(request: FetchOneRequest): FetchOneResult {
     if (request.id === "opencode") return fetchOpenCode(request);
     if (request.id === "alibaba") return fetchAlibaba(request);
     if (request.id === "kie") return fetchKie(request);
+    if (request.id === "devin") return fetchDevin(request);
     return fail(request.id, request.nowMs, "unknown", "Not found");
   } catch (e) {
     if (e instanceof Error) {

@@ -1,13 +1,12 @@
-<!-- 2 列ダッシュボード。最終行は 1 枚。 -->
+<!-- 2 列の広いモニター。パネル（compact）とは別窓。 -->
 <import src="components/provider-card.native"/>
-<column grow="1" padding="12" main="start">
-  <column background="surface" radius="xl" padding="12" grow="1" gap="8">
+<column grow="1" padding="16" main="start">
+  <column window-drag="true" background="surface" radius="xl" padding="12" grow="1" gap="8">
     <row window-drag="true" gap="4" cross="center">
       <text grow="1"><span weight="medium">Dashboard</span></text>
       <text foreground="text_muted">{intervalCaption}</text>
       <button size="sm" variant="ghost" icon="refresh-cw" on-press="refresh_requested" label="Refresh"></button>
       <button size="sm" variant="ghost" icon="settings" on-press="open_settings" label="Settings"></button>
-      <button size="sm" variant="ghost" on-press="quit">Quit</button>
       <button size="sm" variant="ghost" icon="x" on-press="hide_dashboard" label="Close"></button>
     </row>
     <separator/>

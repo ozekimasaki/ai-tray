@@ -1,7 +1,7 @@
 // コアとサービスが共有する境界型。秘密バイトは Model に残さない。
 // Model に載せるレコードは interface（参照）。サービス境界は type エイリアス。
 
-/** 監視する 8 プロバイダ。並びはカード表示順。kie は slot 7。 */
+/** 監視する 9 プロバイダ。並びはカード表示順。devin は slot 8。 */
 export type ProviderId =
   | "claude"
   | "codex"
@@ -10,7 +10,8 @@ export type ProviderId =
   | "gemini"
   | "opencode"
   | "alibaba"
-  | "kie";
+  | "kie"
+  | "devin";
 
 /** 資格情報の取り方。auto はファイル→手動の順。 */
 export type AuthSource = "auto" | "oauth" | "cli" | "cookie" | "api";

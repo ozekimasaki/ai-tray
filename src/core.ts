@@ -90,6 +90,8 @@ export type Msg =
   | { readonly kind: "miss_alibaba"; readonly reason: Uint8Array }
   | { readonly kind: "secret_kie"; readonly secret: Uint8Array }
   | { readonly kind: "miss_kie"; readonly reason: Uint8Array }
+  | { readonly kind: "secret_devin"; readonly secret: Uint8Array }
+  | { readonly kind: "miss_devin"; readonly reason: Uint8Array }
   | { readonly kind: "toggle_provider"; readonly slot: number }
   | { readonly kind: "cycle_source"; readonly slot: number }
   | { readonly kind: "cycle_region" }
@@ -141,6 +143,8 @@ export const viewUnbound = [
   "miss_alibaba",
   "secret_kie",
   "miss_kie",
+  "secret_devin",
+  "miss_devin",
   "secret_saved",
   "secret_failed",
   "secret_cleared",
@@ -172,6 +176,7 @@ export function initialModel(): [Model, Cmd<Msg>] {
     emptyProvider("opencode", true),
     emptyProvider("alibaba", true),
     emptyProvider("kie", true),
+    emptyProvider("devin", true),
   ];
   return [
     {
@@ -180,6 +185,7 @@ export function initialModel(): [Model, Cmd<Msg>] {
       refreshIntervalSec: 60,
       demoMode: true,
       forceError: false,
+      // 初回はパネルを出す。以降は persist した compactOpen を尊重する。
       compactOpen: true,
       dashboardOpen: false,
       settingsOpen: false,
@@ -191,7 +197,7 @@ export function initialModel(): [Model, Cmd<Msg>] {
       secretNotice: EMPTY,
       providers: providers,
     },
-    Cmd.now("tick"),
+    Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")]),
   ];
 }
 
@@ -213,6 +219,8 @@ function providerName(id: ProviderId): Uint8Array {
       return asciiBytes("Alibaba");
     case "kie":
       return asciiBytes("Kie");
+    case "devin":
+      return asciiBytes("Devin");
   }
 }
 
@@ -249,6 +257,8 @@ function missingHint(id: ProviderId): Uint8Array {
       return asciiBytes("Paste a Model Studio API key or console cookie in Settings");
     case "kie":
       return asciiBytes("Paste a kie.ai API key in Settings");
+    case "devin":
+      return asciiBytes("Paste org id and Bearer token in Settings");
   }
 }
 
@@ -270,6 +280,8 @@ function settingsHint(id: ProviderId): Uint8Array {
       return asciiBytes("API key first, cookie second. Cycle region for intl vs cn.");
     case "kie":
       return asciiBytes("API key hits GET api.kie.ai/api/v1/chat/credit. Remaining credits, no reset.");
+    case "devin":
+      return asciiBytes("Paste org_id and Bearer token. GET app.devin.ai billing quota. Daily and Weekly.");
   }
 }
 
@@ -617,24 +629,27 @@ function persistable(model: Model): Model {
 
 function sanitizeRestored(model: Model): Model {
   let hasKie = false;
+  let hasDevin = false;
   for (const p of model.providers) {
     if (p.id === "kie") hasKie = true;
+    if (p.id === "devin") hasDevin = true;
   }
-  const withKie: ProviderState[] = [];
-  for (const p of model.providers) withKie.push(p);
-  if (!hasKie) withKie.push(emptyProvider("kie", true));
+  const withExtra: ProviderState[] = [];
+  for (const p of model.providers) withExtra.push(p);
+  if (!hasKie) withExtra.push(emptyProvider("kie", true));
+  if (!hasDevin) withExtra.push(emptyProvider("devin", true));
   return {
     ...model,
     nowMs: 0,
     lastRefreshMs: 0,
-    compactOpen: true,
+    compactOpen: model.compactOpen,
     dashboardOpen: false,
     settingsOpen: false,
     credBytes: new Uint8Array(0),
     credAnchor: 0,
     credFocus: 0,
     secretNotice: EMPTY,
-    providers: mapProviders({ ...model, providers: withKie }, (p) => ({
+    providers: mapProviders({ ...model, providers: withExtra }, (p) => ({
       ...p,
       status: "idle",
       account: EMPTY,
@@ -688,6 +703,7 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
           Cmd.credentials.get("opencode.api", { key: "cred-opencode", ok: "secret_opencode", err: "miss_opencode" }),
           Cmd.credentials.get("alibaba.api", { key: "cred-alibaba", ok: "secret_alibaba", err: "miss_alibaba" }),
           Cmd.credentials.get("kie.api", { key: "cred-kie", ok: "secret_kie", err: "miss_kie" }),
+          Cmd.credentials.get("devin.api", { key: "cred-devin", ok: "secret_devin", err: "miss_devin" }),
         ]),
       ];
     }
@@ -769,13 +785,22 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       if (!providerEnabled(model, "kie")) return model;
       return [model, usageFetchOne(fetchReq(model, "kie", new Uint8Array(0)), { key: "fetch-kie", ok: "fetched", err: "fetch_failed" })];
     }
+    case "secret_devin": {
+      const next = withPresent(model, "devin", true);
+      if (!providerEnabled(next, "devin")) return next;
+      return [next, usageFetchOne(fetchReq(next, "devin", msg.secret), { key: "fetch-devin", ok: "fetched", err: "fetch_failed" })];
+    }
+    case "miss_devin": {
+      if (!providerEnabled(model, "devin")) return model;
+      return [model, usageFetchOne(fetchReq(model, "devin", new Uint8Array(0)), { key: "fetch-devin", ok: "fetched", err: "fetch_failed" })];
+    }
     case "toggle_provider": {
-      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 8 ? Math.trunc(msg.slot) : 0;
       const next = persistable(patchSlot(model, slot, (p) => ({ ...p, enabled: !p.enabled })));
       return [next, Cmd.persist()];
     }
     case "cycle_source": {
-      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 8 ? Math.trunc(msg.slot) : 0;
       const next = persistable(patchSlot(model, slot, (p) => ({ ...p, source: nextSource(p.source) })));
       return [next, Cmd.persist()];
     }
@@ -798,11 +823,16 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [persistable({ ...model, refreshIntervalSec: 60 }), Cmd.persist()];
     case "set_interval_120":
       return [persistable({ ...model, refreshIntervalSec: 120 }), Cmd.persist()];
-    case "toggle_compact":
-      if (model.compactOpen) return [{ ...model, compactOpen: false }, Cmd.hideWindow("main")];
-      return [{ ...model, compactOpen: true }, Cmd.showWindow("main")];
-    case "hide_compact":
-      return [{ ...model, compactOpen: false }, Cmd.hideWindow("main")];
+    case "toggle_compact": {
+      const open = !model.compactOpen;
+      const next = persistable({ ...model, compactOpen: open });
+      if (open) return [next, Cmd.batch([Cmd.persist(), Cmd.showWindow("main")])];
+      return [next, Cmd.batch([Cmd.persist(), Cmd.hideWindow("main")])];
+    }
+    case "hide_compact": {
+      const next = persistable({ ...model, compactOpen: false });
+      return [next, Cmd.batch([Cmd.persist(), Cmd.hideWindow("main")])];
+    }
     case "open_dashboard":
       return { ...model, dashboardOpen: true };
     case "hide_dashboard":
@@ -814,11 +844,11 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
     case "quit":
       return [model, Cmd.quitApp()];
     case "focus_secret": {
-      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 8 ? Math.trunc(msg.slot) : 0;
       return { ...model, credSlot: slot, secretNotice: EMPTY };
     }
     case "clear_secret": {
-      const slot = msg.slot >= 0 && msg.slot <= 7 ? Math.trunc(msg.slot) : 0;
+      const slot = msg.slot >= 0 && msg.slot <= 8 ? Math.trunc(msg.slot) : 0;
       const next = persistable(
         patchSlot({ ...model, credSlot: slot }, slot, (p) => ({ ...p, credentialPresent: false })),
       );
@@ -845,6 +875,9 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       }
       if (slot === 7) {
         return [next, Cmd.credentials.delete("kie.api", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
+      }
+      if (slot === 8) {
+        return [next, Cmd.credentials.delete("devin.api", { key: "cred-del", ok: "secret_cleared", err: "clear_failed" })];
       }
       return next;
     }
@@ -895,6 +928,9 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       if (model.credSlot === 7) {
         return [model, Cmd.credentials.set("kie.api", model.credBytes, { key: "cred-set", ok: "secret_saved", err: "secret_failed" })];
       }
+      if (model.credSlot === 8) {
+        return [model, Cmd.credentials.set("devin.api", model.credBytes, { key: "cred-set", ok: "secret_saved", err: "secret_failed" })];
+      }
       return model;
     }
     case "clear_draft":
@@ -915,12 +951,17 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [persistable({ ...model, secretNotice: asciiBytes("Secret cleared") }), Cmd.persist()];
     case "clear_failed":
       return { ...model, secretNotice: asciiBytes("Could not clear secret") };
-    case "restored":
-      return [sanitizeRestored(model), Cmd.now("tick")];
+    case "restored": {
+      const next = sanitizeRestored(model);
+      if (next.compactOpen) return [next, Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")])];
+      return [next, Cmd.batch([Cmd.now("tick"), Cmd.hideWindow("main")])];
+    }
     case "fresh_boot":
-      return [model, Cmd.now("tick")];
+      if (model.compactOpen) return [model, Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")])];
+      return [model, Cmd.batch([Cmd.now("tick"), Cmd.hideWindow("main")])];
     case "restore_failed":
-      return [model, Cmd.now("tick")];
+      if (model.compactOpen) return [model, Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")])];
+      return [model, Cmd.batch([Cmd.now("tick"), Cmd.hideWindow("main")])];
   }
 }
 
@@ -940,6 +981,7 @@ export function commandMsg(name: string): Msg | null {
   if (name === "app.settings") return { kind: "open_settings" };
   if (name === "app.refresh") return { kind: "refresh_requested" };
   if (name === "app.quit") return { kind: "quit" };
+  if (name === "app.compact-closed") return { kind: "hide_compact" };
   if (name === "app.dashboard-closed") return { kind: "hide_dashboard" };
   if (name === "app.settings-closed") return { kind: "hide_settings" };
   return null;
@@ -1062,6 +1104,7 @@ function settingsWindow(): WindowDescriptor {
   });
 }
 
+/** Dashboard / Settings だけ二次 GPU。パネルは main。 */
 export function windows(model: Model): readonly WindowDescriptor[] {
   if (model.dashboardOpen && model.settingsOpen) {
     return [dashboardWindow(), settingsWindow()];
