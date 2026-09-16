@@ -277,6 +277,18 @@ function emptyWindows(): readonly QuotaWindow[] {
   return items;
 }
 
+/** 表示用の時計。後続 tick が 0 になっても lastRefreshMs を残す。 */
+function clockMs(model: Model): number {
+  if (model.nowMs >= model.lastRefreshMs) {
+    if (model.nowMs >= 0 && model.nowMs <= 9007199254740991) return Math.trunc(model.nowMs);
+    return 0;
+  }
+  if (model.lastRefreshMs >= 0 && model.lastRefreshMs <= 9007199254740991) {
+    return Math.trunc(model.lastRefreshMs);
+  }
+  return 0;
+}
+
 function barTone(usedPercent: number): QuotaTone {
   if (usedPercent > 90) return "destructive";
   if (usedPercent > 50) return "warning";
@@ -339,10 +351,11 @@ function cardFromProvider(nowMs: number, p: ProviderState, forceError: boolean):
 
 export function visibleCards(model: Model): readonly CardView[] {
   const out: CardView[] = [];
+  const nowMs = clockMs(model);
   for (const p of model.providers) {
     if (!p.enabled) continue;
     const force = model.forceError && out.length === 0;
-    out.push(cardFromProvider(model.nowMs, p, force));
+    out.push(cardFromProvider(nowMs, p, force));
   }
   return out;
 }
@@ -375,7 +388,7 @@ export function visibleBars(model: Model): readonly FlatBar[] {
 }
 
 export function updatedLabel(model: Model): Uint8Array {
-  return formatAgo(model.nowMs, model.lastRefreshMs);
+  return formatAgo(clockMs(model), model.lastRefreshMs);
 }
 
 export function intervalCaption(model: Model): Uint8Array {
@@ -446,7 +459,8 @@ function patchSlot(
 }
 
 function applyDemo(model: Model): Model {
-  const seeded = demoProviders(model.nowMs);
+  const nowMs = model.nowMs >= 0 && model.nowMs <= 9007199254740991 ? Math.trunc(model.nowMs) : 0;
+  const seeded = demoProviders(nowMs);
   const merged: ProviderState[] = [];
   for (const p of model.providers) {
     const demo = seeded.find((d) => d.id === p.id);
@@ -458,11 +472,11 @@ function applyDemo(model: Model): Model {
         enabled: p.enabled,
         source: p.source,
         credentialPresent: p.credentialPresent,
-        fetchedAtMs: model.nowMs,
+        fetchedAtMs: nowMs,
       });
     }
   }
-  return { ...model, lastRefreshMs: model.nowMs, providers: merged };
+  return { ...model, nowMs: nowMs, lastRefreshMs: nowMs, providers: merged };
 }
 
 function markLoading(model: Model): Model {
@@ -603,8 +617,7 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       const nowMs = msg.nowMs >= 0 && msg.nowMs <= 9007199254740991 ? Math.trunc(msg.nowMs) : 0;
       const next = { ...model, nowMs: nowMs };
       if (next.demoMode) {
-        if (next.lastRefreshMs === 0) return applyDemo(next);
-        return { ...next, lastRefreshMs: next.nowMs };
+        return applyDemo(next);
       }
       return [
         markLoading(next),
@@ -834,6 +847,10 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [model, Cmd.now("tick")];
     case "restore_failed":
       return [model, Cmd.now("tick")];
+    default: {
+      const _exhaustive: never = msg;
+      return model;
+    }
   }
 }
 
