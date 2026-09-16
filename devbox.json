@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.6/.schema/devbox.schema.json",
+  "packages": [
+    "nodejs@24",
+    "curl",
+    "sqlite"
+  ],
+  "env": {
+    "PATH": "$HOME/.npm-global/bin:$PATH"
+  },
+  "shell": {
+    "scripts": {
+      "setup": [
+        "npm install -g @native-sdk/cli@0.9.3"
+      ],
+      "check": [
+        "native check"
+      ],
+      "dev": [
+        "native dev"
+      ],
+      "build": [
+        "native build"
+      ],
+      "package-windows": [
+        "native package --target windows"
+      ]
+    }
+  }
+}

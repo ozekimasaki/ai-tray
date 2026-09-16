@@ -1,0 +1,56 @@
+<template name="provider-card" args="slot">
+  <column>
+    <for each="visibleCards" key="id" as="c">
+      <if test="{c.slot == slot}">
+        <column background="surface_subtle" radius="lg" padding="10" gap="6">
+          <row gap="8" cross="center">
+            <text grow="1"><span weight="medium">{c.name}</span></text>
+            <badge>{c.sourceBadge}</badge>
+          </row>
+          <text foreground="text_muted">{c.plan}</text>
+          <if test="{c.status == 'loading'}">
+            <text foreground="text_muted">Fetching...</text>
+            <spinner/>
+          </if>
+          <if test="{c.status == 'missing'}">
+            <text wrap="true" foreground="text_muted">{c.hint}</text>
+          </if>
+          <if test="{c.status == 'error'}">
+            <text foreground="destructive" wrap="true">{c.errorText}</text>
+            <if test="{c.stale}">
+              <text foreground="text_muted">Showing last values</text>
+            </if>
+          </if>
+          <if test="{c.status == 'ready'}">
+            <if test="{c.stale}">
+              <badge>Stale</badge>
+            </if>
+            <for each="c.bars" key="id" as="b">
+              <column gap="2">
+                <row cross="center" gap="8">
+                  <text grow="1">{b.title}</text>
+                  <text>{b.leftLabel}</text>
+                </row>
+                <progress value="{b.usedFraction}" label="{b.title}"/>
+                <if test="{b.tone == 'destructive'}">
+                  <text foreground="destructive">{b.resetLabel}</text>
+                </if>
+                <else>
+                  <if test="{b.tone == 'warning'}">
+                    <text foreground="warning">{b.resetLabel}</text>
+                  </if>
+                  <else>
+                    <text foreground="text_muted">{b.resetLabel}</text>
+                  </else>
+                </else>
+              </column>
+            </for>
+          </if>
+          <if test="{c.status == 'idle'}">
+            <text foreground="text_muted">Waiting for refresh</text>
+          </if>
+        </column>
+      </if>
+    </for>
+  </column>
+</template>

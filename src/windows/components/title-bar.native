@@ -1,0 +1,10 @@
+<template name="title-bar" args="heading">
+  <row window-drag="true" gap="4" cross="center">
+    <text grow="1"><span weight="medium">{heading}</span></text>
+    <button size="sm" variant="ghost" icon="refresh-cw" on-press="refresh_requested" label="Refresh"></button>
+    <button size="sm" variant="ghost" icon="panel-right" on-press="open_dashboard" label="Dashboard"></button>
+    <button size="sm" variant="ghost" icon="settings" on-press="open_settings" label="Settings"></button>
+    <button size="sm" variant="ghost" on-press="quit">Quit</button>
+    <button size="sm" variant="ghost" icon="x" on-press="hide_compact" label="Close"></button>
+  </row>
+</template>

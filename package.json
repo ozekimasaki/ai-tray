@@ -1,0 +1,13 @@
+{
+  "name": "quotabar",
+  "private": true,
+  "description": "Editor and versioning surface only: stock TypeScript tooling resolves @native-sdk/core from here. The native CLI never reads it and builds with node_modules absent.",
+  "scripts": {
+    "check": "native check",
+    "dev": "native dev",
+    "build": "native build"
+  },
+  "dependencies": {
+    "@native-sdk/core": "0.9.3"
+  }
+}

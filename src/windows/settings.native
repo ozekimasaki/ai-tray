@@ -1,0 +1,68 @@
+<!-- プロバイダ ON、ソース、資格情報、間隔、デモ切替。 -->
+<column grow="1" padding="12" main="start">
+  <column background="surface" radius="xl" padding="12" grow="1" gap="8">
+    <row window-drag="true" gap="4" cross="center">
+      <text grow="1"><span weight="medium">Settings</span></text>
+      <button size="sm" variant="ghost" on-press="quit">Quit</button>
+      <button size="sm" variant="ghost" icon="x" on-press="hide_settings" label="Close"></button>
+    </row>
+    <separator/>
+    <scroll grow="1">
+      <column gap="12">
+        <column gap="6">
+          <text><span weight="medium">Data</span></text>
+          <switch checked="{demoMode}" on-toggle="toggle_demo">Demo data</switch>
+          <text foreground="text_muted" wrap="true">Demo paints seven sample cards with no network. Turn it off to read local CLI sessions, cookies, and API keys.</text>
+          <switch checked="{forceError}" on-toggle="toggle_force_error">Preview error state</switch>
+          <row gap="8" cross="center">
+            <text grow="1">Refresh interval</text>
+            <text>{intervalCaption}</text>
+          </row>
+          <row gap="8">
+            <button size="sm" variant="secondary" on-press="set_interval_30">30s</button>
+            <button size="sm" variant="secondary" on-press="set_interval_60">60s</button>
+            <button size="sm" variant="secondary" on-press="set_interval_120">120s</button>
+          </row>
+        </column>
+        <separator/>
+        <text><span weight="medium">Providers</span></text>
+        <for each="settingsRows" key="id" as="s">
+          <column background="surface_subtle" radius="lg" padding="10" gap="6">
+            <row gap="8" cross="center">
+              <text grow="1"><span weight="medium">{s.name}</span></text>
+              <switch checked="{s.enabled}" on-toggle="toggle_provider:{s.slot}">Enabled</switch>
+            </row>
+            <text foreground="text_muted">{s.sourceLabel}</text>
+            <row gap="4">
+              <button size="sm" variant="ghost" on-press="cycle_source:{s.slot}">Cycle source</button>
+              <if test="{s.showRegion}">
+                <button size="sm" variant="ghost" on-press="cycle_region">{s.regionLabel}</button>
+              </if>
+            </row>
+            <text foreground="text_muted" wrap="true">{s.hint}</text>
+            <if test="{s.credentialPresent}">
+              <badge>Secret saved</badge>
+            </if>
+            <row gap="8">
+              <button size="sm" variant="secondary" on-press="focus_secret:{s.slot}">Edit secret</button>
+              <button size="sm" variant="ghost" on-press="clear_secret:{s.slot}">Clear secret</button>
+            </row>
+          </column>
+        </for>
+        <separator/>
+        <column gap="6">
+          <text><span weight="medium">Secret for {secretTargetName}</span></text>
+          <text foreground="text_muted" wrap="true">Paste an API key or a cookie. It is stored in the OS credential manager, never in the saved model.</text>
+          <text-field text="{credText}" placeholder="API key or cookie" on-input="cred_edit" on-submit="save_secret" label="Provider secret"/>
+          <row gap="8">
+            <button variant="primary" on-press="save_secret">Save secret</button>
+            <button variant="ghost" on-press="clear_draft">Clear field</button>
+          </row>
+          <if test="{hasSecretNotice}">
+            <text foreground="text_muted">{secretNotice}</text>
+          </if>
+        </column>
+      </column>
+    </scroll>
+  </column>
+</column>
