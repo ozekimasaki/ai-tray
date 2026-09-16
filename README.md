@@ -19,6 +19,7 @@ Windows 向けのトレイ常駐 AI 利用量モニタです。Claude / Codex / 
 - Node.js 24（Native SDK の frontend / scriptc。出荷バイナリには入らない）
 - Native SDK CLI 0.9.3: `npm install -g @native-sdk/cli`
 - Zig は CLI が用意する
+- Linux で `native dev` するとき: GTK4 開発パッケージ（Ubuntu なら `libgtk-4-dev`）
 - 実データ取得時: `curl`（HTTPS）、Cursor は `sqlite3`（`state.vscdb` を read-only）、Antigravity は `agy`
 
 再現可能なシェルは jetify Devbox です。
@@ -85,6 +86,8 @@ Windows でトレイ常駐にするには、パッケージ後にアプリを起
 - Demo 7 カード、全オフの空状態、Settings の Preview error state
 - Settings でプロバイダを消すと compact から消える
 - Close でプロセスが死なない（hide）。終了は Quit
+
+Linux では GTK4 がリンクされます。Ubuntu なら `sudo apt install libgtk-4-dev`。Devbox なら `gtk4` パッケージを入れたうえで `devbox run dev`。
 
 ```sh
 native dev

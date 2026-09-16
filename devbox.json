@@ -3,7 +3,9 @@
   "packages": [
     "nodejs@24",
     "curl",
-    "sqlite"
+    "sqlite",
+    "gtk4",
+    "pkg-config"
   ],
   "env": {
     "PATH": "$HOME/.npm-global/bin:$PATH"
