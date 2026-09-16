@@ -855,10 +855,6 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [model, Cmd.now("tick")];
     case "restore_failed":
       return [model, Cmd.now("tick")];
-    default: {
-      const _exhaustive: never = msg;
-      return model;
-    }
   }
 }
 
