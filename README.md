@@ -50,7 +50,7 @@ native dev
 2. Settings でプロバイダの ON/OFF、ソース（auto / oauth / cli / cookie / api）、Alibaba の intl/cn、更新間隔を変えます。
 3. Demo data を切ると、次の Refresh でローカル資格情報を読みます。
 4. API キーや Cookie は Settings の secret 欄へ。Windows は Credential Manager、macOS は Keychain、Linux は Secret Service。persist には乗りません。
-5. Close はパネルを隠します。終了はトレイ（Windows / macOS）の Quit、または Settings の Quit。
+5. Close は compact GPU 窓を破棄します。終了はトレイ（Windows / macOS）の Quit、または Settings の Quit。
 
 ### 各プロバイダのログイン
 
@@ -91,7 +91,7 @@ Windows / macOS では Compact を Close すると GPU 窓は破棄され、ト�
 
 ## macOS での開発
 
-`native dev` を Mac 上で実行します。メニューバー extra にパーセント（データが無ければ `QB`）が出ます。パネルは main 窓です。Close すると隠してトレイに戻ります。終了は extra の Quit、または Settings の Quit。実データの Cursor は `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`。`curl` と `sqlite3` は macOS 標準です。`agy` は PATH へ入れてください。
+`native dev` を Mac 上で実行します。メニューバー extra にパーセント（データが無ければ `QB`）が出ます。パネルは `windows(model)` の compact 二次窓です。Close すると GPU 面を破棄してトレイに戻ります。終了は extra の Quit、または Settings の Quit。実データの Cursor は `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`。`curl` と `sqlite3` は macOS 標準です。`agy` は PATH へ入れてください。
 
 この Linux 環境では `.app` の起動もメニューバー extra も検証していません。
 
@@ -105,7 +105,7 @@ Windows / macOS では Compact を Close すると GPU 窓は破棄され、ト�
 - 文言が英語で tofu が無い
 - Demo 9 カード、全オフの空状態、Settings の Preview error state
 - Settings でプロバイダを消すとパネルから消える
-- Close でプロセスが死なない（パネルを隠す。Linux にはトレイが無いので戻る手段は無い）。終了は Settings の Quit
+- Close でプロセスが死なない（compact GPU を破棄する。Linux にはトレイが無いので戻る手段は無い）。終了は Settings の Quit
 
 Linux では GTK4 がリンクされます。Ubuntu なら `sudo apt install libgtk-4-dev`。Devbox なら `gtk4` パッケージを入れたうえで `devbox run dev`。
 
@@ -119,7 +119,8 @@ native dev
 
 - `app.zon` — アプリ ID `dev.quotabar.app`、Windows/macOS/Linux、tray / persist / credentials、fetch allowlist
 - `src/core.ts` — Model / Msg / update / subscriptions / statusItem / windows
-- `src/app.native` — パネル（main 窓）
+- `src/app.native` — 隠した GPU ホスト（空）
+- `src/windows/compact.native` — トレイパネル（二次 GPU。Close で破棄）
 - `src/windows/dashboard.native` / `settings.native`
 - `src/services/usage.ts` — `fetchOne`（同期。curl / sqlite3 / agy）
 - `src/demo.ts` — デモ 9 カード

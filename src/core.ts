@@ -197,7 +197,7 @@ export function initialModel(): [Model, Cmd<Msg>] {
       secretNotice: EMPTY,
       providers: providers,
     },
-    Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")]),
+    Cmd.now("tick"),
   ];
 }
 
@@ -826,12 +826,11 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
     case "toggle_compact": {
       const open = !model.compactOpen;
       const next = persistable({ ...model, compactOpen: open });
-      if (open) return [next, Cmd.batch([Cmd.persist(), Cmd.showWindow("main")])];
-      return [next, Cmd.batch([Cmd.persist(), Cmd.hideWindow("main")])];
+      return [next, Cmd.persist()];
     }
     case "hide_compact": {
       const next = persistable({ ...model, compactOpen: false });
-      return [next, Cmd.batch([Cmd.persist(), Cmd.hideWindow("main")])];
+      return [next, Cmd.persist()];
     }
     case "open_dashboard":
       return { ...model, dashboardOpen: true };
@@ -951,17 +950,12 @@ export function update(model: Model, msg: Msg): Model | [Model, Cmd<Msg>] {
       return [persistable({ ...model, secretNotice: asciiBytes("Secret cleared") }), Cmd.persist()];
     case "clear_failed":
       return { ...model, secretNotice: asciiBytes("Could not clear secret") };
-    case "restored": {
-      const next = sanitizeRestored(model);
-      if (next.compactOpen) return [next, Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")])];
-      return [next, Cmd.batch([Cmd.now("tick"), Cmd.hideWindow("main")])];
-    }
+    case "restored":
+      return [sanitizeRestored(model), Cmd.now("tick")];
     case "fresh_boot":
-      if (model.compactOpen) return [model, Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")])];
-      return [model, Cmd.batch([Cmd.now("tick"), Cmd.hideWindow("main")])];
+      return [model, Cmd.now("tick")];
     case "restore_failed":
-      if (model.compactOpen) return [model, Cmd.batch([Cmd.now("tick"), Cmd.showWindow("main")])];
-      return [model, Cmd.batch([Cmd.now("tick"), Cmd.hideWindow("main")])];
+      return [model, Cmd.now("tick")];
   }
 }
 
@@ -1062,6 +1056,27 @@ export function themeState(model: Model): ThemeState {
     : { pack: "geist", colorScheme: "system" };
 }
 
+function compactWindow(): WindowDescriptor {
+  return windowDescriptor({
+    label: asciiBytes("compact"),
+    canvasLabel: asciiBytes("compact-canvas"),
+    title: asciiBytes("QuotaBar"),
+    width: 380,
+    height: 640,
+    resizable: false,
+    minWidth: 360,
+    minHeight: 480,
+    titlebar: "chromeless",
+    transparent: true,
+    alwaysOnTop: false,
+    clickThrough: false,
+    activateOnShow: true,
+    allowsFullscreen: false,
+    closePolicy: "quit",
+    onCloseCommand: asciiBytes("app.compact-closed"),
+  });
+}
+
 function dashboardWindow(): WindowDescriptor {
   return windowDescriptor({
     label: asciiBytes("dashboard"),
@@ -1104,10 +1119,22 @@ function settingsWindow(): WindowDescriptor {
   });
 }
 
-/** Dashboard / Settings だけ二次 GPU。パネルは main。 */
+/** Compact / Dashboard / Settings は二次 GPU。main は隠したホストだけ。 */
 export function windows(model: Model): readonly WindowDescriptor[] {
+  if (model.compactOpen && model.dashboardOpen && model.settingsOpen) {
+    return [compactWindow(), dashboardWindow(), settingsWindow()];
+  }
+  if (model.compactOpen && model.dashboardOpen) {
+    return [compactWindow(), dashboardWindow()];
+  }
+  if (model.compactOpen && model.settingsOpen) {
+    return [compactWindow(), settingsWindow()];
+  }
   if (model.dashboardOpen && model.settingsOpen) {
     return [dashboardWindow(), settingsWindow()];
+  }
+  if (model.compactOpen) {
+    return [compactWindow()];
   }
   if (model.dashboardOpen) {
     return [dashboardWindow()];

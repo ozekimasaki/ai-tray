@@ -3,7 +3,7 @@
     .name = "quotabar",
     .display_name = "QuotaBar",
     .description = "Tray-resident AI usage monitor for Claude, Codex, Cursor, Antigravity, Gemini, OpenCode, Alibaba, Kie, and Devin.",
-    .version = "0.1.0",
+    .version = "0.1.1",
     .icons = .{"assets/icon.png"},
     .platforms = .{ "windows", "macos", "linux" },
     // macOS は LSUIElement。トレイ（NSStatusItem）が復帰手段。Linux は Dock を持たないので無視される。
@@ -31,17 +31,19 @@
     .shell = .{
         .windows = .{
             .{
+                // 隠した GPU オプションホスト。パネルは windows(model) の compact。
+                // hideWindow すると Metal 面が残るので、ここは見せない。
                 .label = "main",
                 .title = "QuotaBar",
-                .width = 380,
-                .height = 640,
-                .min_width = 360,
-                .min_height = 480,
+                .width = 64,
+                .height = 64,
+                .min_width = 64,
+                .min_height = 64,
                 .resizable = false,
                 .restore_state = false,
                 .restore_policy = "center_on_primary",
                 .titlebar = "chromeless",
-                .transparent = true,
+                .transparent = false,
                 .always_on_top = false,
                 .click_through = false,
                 .initially_hidden = true,
@@ -51,8 +53,8 @@
                         .label = "host-canvas",
                         .kind = "gpu_surface",
                         .fill = true,
-                        .role = "Quota panel",
-                        .accessibility_label = "QuotaBar panel",
+                        .role = "QuotaBar GPU host",
+                        .accessibility_label = "QuotaBar GPU host",
                         // metal。software にすると二次窓も CPU 描画を継承する。
                         .gpu_backend = "metal",
                         .gpu_pixel_format = "bgra8_unorm",
