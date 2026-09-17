@@ -3,7 +3,7 @@
     .name = "quotabar",
     .display_name = "QuotaBar",
     .description = "Tray-resident AI usage monitor for Claude, Codex, Cursor, Antigravity, Gemini, OpenCode, Alibaba, Kie, and Devin.",
-    .version = "0.1.0",
+    .version = "0.1.1",
     .icons = .{"assets/icon.png"},
     .platforms = .{ "windows", "macos", "linux" },
     // macOS は LSUIElement。トレイ（NSStatusItem）が復帰手段。Linux は Dock を持たないので無視される。
