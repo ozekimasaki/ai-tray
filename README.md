@@ -99,12 +99,14 @@ Windows / macOS では Compact を Close すると GPU 窓は破棄され、ト�
 
 ネイティブ Windows（x64）で開発・実行・パッケージします。WSL は不要です。Zig 0.16.0 の `aarch64-windows` は上流が壊れているので ARM マシンは対象外です。
 
-1. [Node.js 24](https://nodejs.org/)（scriptc が `node` を呼ぶ）。CLI だけ Bun で入れても Node 24 は PATH に残す
-2. Zig 0.16.0。CLI は Windows 向けアーカイブを持たないので、[mise](https://mise.jdx.dev/) か [ziglang.org](https://ziglang.org/download/) の `zig-x86_64-windows-0.16.0.zip` を PATH へ。Visual Studio / clang は `SCRIPTC_CC=zigcc` なら不要
-3. Native SDK CLI 0.9.3。Bun なら `bun install -g @native-sdk/cli@0.9.3`（`%USERPROFILE%\.bun\bin` を PATH へ）。npm なら `npm install -g @native-sdk/cli@0.9.3`
-4. 実データの Cursor 用に `sqlite3`（`winget install SQLite.SQLite` など）。`curl` は Windows 10 以降に付属。Antigravity は `agy`
+`native` は WinGet のパッケージ名ではない。PowerShell が Diskuv.OCaml などを提案しても **入れない**。入れるのは npm の `@native-sdk/cli@0.9.3`（コマンドは `native.cmd`）。
 
-Git Bash:
+1. [Node.js 24](https://nodejs.org/)（scriptc が `node` を呼ぶ）。`npm` が無いなら先にこれ。CLI だけ Bun で入れても Node 24 は PATH に残す
+2. Zig 0.16.0。CLI は Windows 向けアーカイブを持たないので、[mise](https://mise.jdx.dev/) か [ziglang.org](https://ziglang.org/download/) の `zig-x86_64-windows-0.16.0.zip` を PATH へ。Visual Studio / clang は `SCRIPTC_CC=zigcc` なら不要
+3. Native SDK CLI 0.9.3（下の PowerShell / Git Bash）。Bun なら `bun install -g @native-sdk/cli@0.9.3`（`%USERPROFILE%\.bun\bin` を PATH へ）
+4. 実データの Cursor 用に `sqlite3`（`winget install SQLite.SQLite` など。これは sqlite 用で、`native` 用ではない）。`curl` は Windows 10 以降に付属。Antigravity は `agy`
+
+Git Bash（CLI をグローバルに入れたあと）:
 
 ```sh
 export SCRIPTC_CC=zigcc
@@ -113,13 +115,26 @@ native build                       # ReleaseFast → zig-out/bin/quotabar.exe
 native package --target windows    # 上の exe をディレクトリに包む
 ```
 
-PowerShell:
+PowerShell。先に CLI を入れて、同じセッションの PATH を更新する。`$env:SCRIPTC_CC` だけでは `native` は増えない。
 
 ```powershell
+npm i -g @native-sdk/cli@0.9.3
+$env:Path = "$env:APPDATA\npm;" + [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+Get-Command native   # C:\Users\<you>\AppData\Roaming\npm\native.cmd が見えること
+
 $env:SCRIPTC_CC = "zigcc"
 native dev
 native build
 native package --target windows
+```
+
+`native` がまだ無い／入れたくないときは `npx`（グローバル PATH 不要）:
+
+```powershell
+$env:SCRIPTC_CC = "zigcc"
+npx --yes @native-sdk/cli@0.9.3 dev
+npx --yes @native-sdk/cli@0.9.3 build
+npx --yes @native-sdk/cli@0.9.3 package --target windows
 ```
 
 `native check` は Windows では壊れます（バックスラッシュパスを `/` 専用の import resolver に渡す）。代わりにスラッシュで:
