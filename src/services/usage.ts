@@ -1,17 +1,20 @@
 // 9 プロバイダの利用量を同期取得する。throw せず FetchOneResult を返す。
 
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import type {
   AlibabaRegion,
   AuthSource,
   ErrorKind,
   FetchOneRequest,
   FetchOneResult,
+  PathKind,
   ProviderId,
   QuotaWindow,
 } from "../snapshot.ts";
-import { resolve } from "./paths.ts";
+import { search } from "./paths.ts";
 
 const EMPTY = new Uint8Array(0);
 // 公開リポジトリには実クライアントを載せない。Gemini CLI の refresh が必要なら手元で埋める。
@@ -92,6 +95,11 @@ type LooseJson = {
   overage_balance?: number;
   daily_quota?: LooseWindow;
   weekly_quota?: LooseWindow;
+  token?: string;
+  refreshToken?: string;
+  os_crypt?: { encrypted_key?: string };
+  "oauth:tokenCacheV2"?: string;
+  "oauth:tokenCache"?: string;
 };
 
 type HttpResult = {
@@ -327,8 +335,43 @@ function httpErrorText(status: number): string {
   return "Network error";
 }
 
-function pathFor(kind: "claude" | "codex" | "cursor" | "gemini"): string {
-  return decodeBytes(resolve({ kind: kind }).path);
+function pathsFor(kind: PathKind): string[] {
+  const raw = decodeBytes(search({ kind: kind }).path);
+  const out: string[] = [];
+  if (raw.length === 0) return out;
+  const parts = raw.split("\n");
+  let i = 0;
+  while (i < parts.length) {
+    const row = parts[i].trim();
+    if (row.length > 0) out.push(row);
+    i = i + 1;
+  }
+  return out;
+}
+
+function runTool(command: string, args: string[], timeoutMs: number): string {
+  try {
+    const out = execFileSync(command, args, {
+      encoding: "utf8",
+      timeout: timeoutMs,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    return out.trim();
+  } catch {
+    return "";
+  }
+}
+
+function slashPath(value: string): string {
+  let out = "";
+  let i = 0;
+  while (i < value.length) {
+    const ch = value[i];
+    if (ch === "\\") out = out + "/";
+    else out = out + ch;
+    i = i + 1;
+  }
+  return out;
 }
 
 function jwtExpMs(token: string): number {
@@ -366,25 +409,360 @@ function cookieHeader(secret: string): string {
   return trimmed;
 }
 
-function readClaudeToken(source: AuthSource, secret: string): string {
-  if (source === "cookie" || source === "api") return secret;
-  const file = parseJson(readTextFile(pathFor("claude")));
-  if (file != null && file.claudeAiOauth != null) {
+function tokenFromClaudeJson(file: LooseJson | null): string {
+  if (file == null) return "";
+  if (file.claudeAiOauth != null) {
     const token = file.claudeAiOauth.accessToken ?? file.claudeAiOauth.access_token;
     if (token != null && token.length > 0) return token;
   }
-  if (file != null && file.access_token != null && file.access_token.length > 0) {
-    return file.access_token;
+  if (file.access_token != null && file.access_token.length > 0) return file.access_token;
+  if (file.accessToken != null && file.accessToken.length > 0) return file.accessToken;
+  return "";
+}
+
+function jsonStringField(text: string, field: string): string {
+  const keys = ["\"" + field + "\":\"", "\"" + field + "\": \""];
+  let k = 0;
+  while (k < keys.length) {
+    const needle = keys[k];
+    const at = text.indexOf(needle);
+    if (at >= 0) {
+      const start = at + needle.length;
+      let end = start;
+      while (end < text.length && text[end] !== "\"") {
+        if (text[end] === "\\") end = end + 1;
+        end = end + 1;
+      }
+      if (end > start) return text.slice(start, end);
+    }
+    k = k + 1;
   }
+  return "";
+}
+
+function inferenceTokenFromCacheObject(text: string): string {
+  if (text.length === 0) return "";
+  const fromOauth = tokenFromClaudeJson(parseJson(text));
+  if (fromOauth.length > 0) return fromOauth;
+  const mark = text.indexOf("user:inference");
+  if (mark >= 0) {
+    const windowEnd = mark + 1200 < text.length ? mark + 1200 : text.length;
+    const window = text.slice(mark, windowEnd);
+    const token = jsonStringField(window, "token");
+    if (token.length > 0) return token;
+  }
+  const anyToken = jsonStringField(text, "token");
+  if (anyToken.indexOf("sk-ant-") === 0) return anyToken;
+  return "";
+}
+
+function stripSingleQuotes(value: string): string {
+  let out = "";
+  let i = 0;
+  while (i < value.length) {
+    if (value[i] !== "'") out = out + value[i];
+    i = i + 1;
+  }
+  return out;
+}
+
+function powershellUnprotect(b64: string): string {
+  const script =
+    "Add-Type -AssemblyName System.Security; " +
+    "$b = [Convert]::FromBase64String('" +
+    stripSingleQuotes(b64) +
+    "'); " +
+    "$p = [System.Security.Cryptography.ProtectedData]::Unprotect($b, $null, 'CurrentUser'); " +
+    "[Convert]::ToBase64String($p)";
+  return runTool("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], 8000);
+}
+
+function nodeAesGcmDecrypt(keyB64: string, blobB64: string): string {
+  const script =
+    "const c=require('crypto');" +
+    "const key=Buffer.from(process.argv[1],'base64');" +
+    "const raw=Buffer.from(process.argv[2],'base64');" +
+    "if(raw.length<31) process.exit(2);" +
+    "const prefix=raw.slice(0,3).toString();" +
+    "if(prefix!=='v10' && prefix!=='v20') process.exit(3);" +
+    "const nonce=raw.slice(3,15);" +
+    "const tag=raw.slice(raw.length-16);" +
+    "const data=raw.slice(15,raw.length-16);" +
+    "const d=c.createDecipheriv('aes-256-gcm',key,nonce);" +
+    "d.setAuthTag(tag);" +
+    "process.stdout.write(Buffer.concat([d.update(data),d.final()]).toString('utf8'));";
+  const fromNode = runTool("node", ["-e", script, keyB64, blobB64], 8000);
+  if (fromNode.length > 0) return fromNode;
+  return runTool("node.exe", ["-e", script, keyB64, blobB64], 8000);
+}
+
+function windowsGcmDecrypt(keyB64: string, blobB64: string): string {
+  const viaNode = nodeAesGcmDecrypt(keyB64, blobB64);
+  if (viaNode.length > 0) return viaNode;
+  const ps1 = join(tmpdir(), "quotabar-gcm.ps1");
+  const body =
+    "Add-Type -AssemblyName System.Security\n" +
+    "Add-Type @\"\n" +
+    "using System;\n" +
+    "using System.Runtime.InteropServices;\n" +
+    "public static class QbGcm {\n" +
+    "  [StructLayout(LayoutKind.Sequential)]\n" +
+    "  public struct Info {\n" +
+    "    public int cbSize; public int dwInfoVersion;\n" +
+    "    public IntPtr pbNonce; public int cbNonce;\n" +
+    "    public IntPtr pbAuthData; public int cbAuthData;\n" +
+    "    public IntPtr pbTag; public int cbTag;\n" +
+    "    public IntPtr pbMacContext; public int cbMacContext;\n" +
+    "    public int cbAAD; public long cbData; public int dwFlags;\n" +
+    "  }\n" +
+    "  [DllImport(\"bcrypt.dll\")] static extern int BCryptOpenAlgorithmProvider(out IntPtr a, [MarshalAs(UnmanagedType.LPWStr)] string n, string i, uint f);\n" +
+    "  [DllImport(\"bcrypt.dll\")] static extern int BCryptSetProperty(IntPtr h, [MarshalAs(UnmanagedType.LPWStr)] string p, byte[] b, int c, uint f);\n" +
+    "  [DllImport(\"bcrypt.dll\")] static extern int BCryptGenerateSymmetricKey(IntPtr a, out IntPtr k, IntPtr o, int oc, byte[] s, int sl, uint f);\n" +
+    "  [DllImport(\"bcrypt.dll\")] static extern int BCryptDecrypt(IntPtr k, byte[] i, int il, ref Info p, byte[] iv, int ivl, byte[] o, int ol, out int r, uint f);\n" +
+    "  [DllImport(\"bcrypt.dll\")] static extern int BCryptDestroyKey(IntPtr k);\n" +
+    "  [DllImport(\"bcrypt.dll\")] static extern int BCryptCloseAlgorithmProvider(IntPtr a, uint f);\n" +
+    "  public static byte[] Decrypt(byte[] key, byte[] nonce, byte[] cipher, byte[] tag) {\n" +
+    "    IntPtr hAlg; IntPtr hKey;\n" +
+    "    int st = BCryptOpenAlgorithmProvider(out hAlg, \"AES\", null, 0);\n" +
+    "    if (st != 0) throw new Exception(\"open\");\n" +
+    "    byte[] mode = System.Text.Encoding.Unicode.GetBytes(\"ChainingModeGCM\\0\");\n" +
+    "    st = BCryptSetProperty(hAlg, \"ChainingMode\", mode, mode.Length, 0);\n" +
+    "    st = BCryptGenerateSymmetricKey(hAlg, out hKey, IntPtr.Zero, 0, key, key.Length, 0);\n" +
+    "    Info info = new Info();\n" +
+    "    info.cbSize = Marshal.SizeOf(typeof(Info));\n" +
+    "    info.dwInfoVersion = 1;\n" +
+    "    info.pbNonce = Marshal.AllocHGlobal(nonce.Length);\n" +
+    "    Marshal.Copy(nonce, 0, info.pbNonce, nonce.Length);\n" +
+    "    info.cbNonce = nonce.Length;\n" +
+    "    info.pbTag = Marshal.AllocHGlobal(tag.Length);\n" +
+    "    Marshal.Copy(tag, 0, info.pbTag, tag.Length);\n" +
+    "    info.cbTag = tag.Length;\n" +
+    "    byte[] output = new byte[cipher.Length];\n" +
+    "    int wrote;\n" +
+    "    st = BCryptDecrypt(hKey, cipher, cipher.Length, ref info, null, 0, output, output.Length, out wrote, 0);\n" +
+    "    Marshal.FreeHGlobal(info.pbNonce);\n" +
+    "    Marshal.FreeHGlobal(info.pbTag);\n" +
+    "    BCryptDestroyKey(hKey);\n" +
+    "    BCryptCloseAlgorithmProvider(hAlg, 0);\n" +
+    "    if (st != 0) throw new Exception(\"dec\");\n" +
+    "    byte[] pt = new byte[wrote];\n" +
+    "    Array.Copy(output, pt, wrote);\n" +
+    "    return pt;\n" +
+    "  }\n" +
+    "  public static byte[] DecryptBlob(byte[] key, byte[] raw) {\n" +
+    "    if (raw.Length < 31) throw new Exception(\"short\");\n" +
+    "    byte[] nonce = new byte[12];\n" +
+    "    Array.Copy(raw, 3, nonce, 0, 12);\n" +
+    "    byte[] tag = new byte[16];\n" +
+    "    Array.Copy(raw, raw.Length - 16, tag, 0, 16);\n" +
+    "    int clen = raw.Length - 31;\n" +
+    "    byte[] cipher = new byte[clen];\n" +
+    "    Array.Copy(raw, 15, cipher, 0, clen);\n" +
+    "    return Decrypt(key, nonce, cipher, tag);\n" +
+    "  }\n" +
+    "}\n" +
+    "\"@\n" +
+    "$key = [Convert]::FromBase64String('" +
+    stripSingleQuotes(keyB64) +
+    "')\n" +
+    "$raw = [Convert]::FromBase64String('" +
+    stripSingleQuotes(blobB64) +
+    "')\n" +
+    "$pt = [QbGcm]::DecryptBlob($key, $raw)\n" +
+    "[Console]::Out.Write([Text.Encoding]::UTF8.GetString($pt))\n";
+  try {
+    writeFileSync(ps1, body, "utf8");
+    const out = runTool(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", ps1],
+      12000,
+    );
+    try {
+      unlinkSync(ps1);
+    } catch {
+      // temp
+    }
+    return out;
+  } catch {
+    return "";
+  }
+}
+
+function decryptWindowsTokenCache(configPath: string, blob: string): string {
+  const dirEnd = configPath.lastIndexOf("/");
+  const dir = dirEnd >= 0 ? configPath.slice(0, dirEnd) : configPath;
+  const localState = readTextFile(join(dir, "Local State"));
+  const state = parseJson(localState);
+  let keyB64 = "";
+  if (state != null && state.os_crypt != null) {
+    const enc = state.os_crypt.encrypted_key ?? "";
+    if (enc.length > 0) {
+      const raw = Buffer.from(enc, "base64");
+      if (raw.length > 5) {
+        const dpapi = raw.slice(5);
+        const unprotected = powershellUnprotect(dpapi.toString("base64"));
+        if (unprotected.length > 0) keyB64 = unprotected;
+      }
+    }
+  }
+  if (keyB64.length > 0) {
+    const plain = windowsGcmDecrypt(keyB64, blob);
+    const fromObj = inferenceTokenFromCacheObject(plain);
+    if (fromObj.length > 0) return fromObj;
+  }
+  const whole = powershellUnprotect(blob);
+  if (whole.length > 0) {
+    let decoded = whole;
+    try {
+      decoded = Buffer.from(whole, "base64").toString("utf8");
+    } catch {
+      decoded = whole;
+    }
+    const fromObj = inferenceTokenFromCacheObject(decoded);
+    if (fromObj.length > 0) return fromObj;
+  }
+  return "";
+}
+
+function macosSafeStorageSecret(): string {
+  const out = runTool("/usr/bin/security", ["find-generic-password", "-s", "Claude Safe Storage", "-w"], 8000);
+  return out;
+}
+
+function opensslCbcDecrypt(keyHex: string, blobB64: string): string {
+  const raw = Buffer.from(blobB64, "base64");
+  if (raw.length < 20) return "";
+  const prefix = raw.slice(0, 3).toString("utf8");
+  if (prefix !== "v10") return "";
+  const ct = raw.slice(3);
+  const bin = join(tmpdir(), "quotabar-claude-ct.bin");
+  try {
+    writeFileSync(bin, ct);
+    const out = runTool(
+      "openssl",
+      ["enc", "-aes-128-cbc", "-d", "-K", keyHex, "-iv", "20202020202020202020202020202020", "-in", bin],
+      8000,
+    );
+    try {
+      unlinkSync(bin);
+    } catch {
+      // temp
+    }
+    return out;
+  } catch {
+    return "";
+  }
+}
+
+function pbkdf2KeyHex(secret: string, rounds: string): string {
+  const py =
+    "import hashlib,binascii,sys;" +
+    "s=sys.argv[1].encode();" +
+    "r=int(sys.argv[2]);" +
+    "print(binascii.hexlify(hashlib.pbkdf2_hmac('sha1',s,b'saltysalt',r,16)).decode())";
+  const tools = ["python3", "python", "py"];
+  let t = 0;
+  while (t < tools.length) {
+    const args = tools[t] === "py" ? ["-3", "-c", py, secret, rounds] : ["-c", py, secret, rounds];
+    const out = runTool(tools[t], args, 8000);
+    if (out.length === 32) return out;
+    t = t + 1;
+  }
+  return "";
+}
+
+function decryptMacLinuxTokenCache(blob: string): string {
+  const macSecret = macosSafeStorageSecret();
+  if (macSecret.length > 0) {
+    const keyHex = pbkdf2KeyHex(macSecret, "1003");
+    if (keyHex.length === 32) {
+      const plain = opensslCbcDecrypt(keyHex, blob);
+      const token = inferenceTokenFromCacheObject(plain);
+      if (token.length > 0) return token;
+    }
+  }
+  const linuxKey = pbkdf2KeyHex("peanuts", "1");
+  if (linuxKey.length === 32) {
+    const plain = opensslCbcDecrypt(linuxKey, blob);
+    const token = inferenceTokenFromCacheObject(plain);
+    if (token.length > 0) return token;
+  }
+  return "";
+}
+
+function readClaudeDesktopToken(): string {
+  const configs = pathsFor("claude_desktop");
+  let i = 0;
+  while (i < configs.length) {
+    const path = configs[i];
+    if (!existsSync(path)) {
+      i = i + 1;
+      continue;
+    }
+    const cfg = parseJson(readTextFile(path));
+    if (cfg == null) {
+      i = i + 1;
+      continue;
+    }
+    let blob = "";
+    if (cfg["oauth:tokenCacheV2"] != null && cfg["oauth:tokenCacheV2"].length > 0) {
+      blob = cfg["oauth:tokenCacheV2"];
+    } else if (cfg["oauth:tokenCache"] != null && cfg["oauth:tokenCache"].length > 0) {
+      blob = cfg["oauth:tokenCache"];
+    }
+    if (blob.length === 0) {
+      i = i + 1;
+      continue;
+    }
+    const asObj = inferenceTokenFromCacheObject(blob);
+    if (asObj.length > 0) return asObj;
+    const win = decryptWindowsTokenCache(path, blob);
+    if (win.length > 0) return win;
+    const unix = decryptMacLinuxTokenCache(blob);
+    if (unix.length > 0) return unix;
+    i = i + 1;
+  }
+  return "";
+}
+
+function readClaudeToken(source: AuthSource, secret: string): string {
+  if (source === "cookie" || source === "api") return secret;
+  const files = pathsFor("claude");
+  let i = 0;
+  while (i < files.length) {
+    const token = tokenFromClaudeJson(parseJson(readTextFile(files[i])));
+    if (token.length > 0) return token;
+    i = i + 1;
+  }
+  const desktop = readClaudeDesktopToken();
+  if (desktop.length > 0) return desktop;
   return secret;
+}
+
+function claudeAccountLabel(tokenFromDesktop: boolean): string {
+  if (tokenFromDesktop) return "claude-app";
+  return "claude-code";
 }
 
 function fetchClaude(request: FetchOneRequest): FetchOneResult {
   const secret = secretText(request);
+  const cliFiles = pathsFor("claude");
+  let hasCli = false;
+  let c = 0;
+  while (c < cliFiles.length) {
+    if (tokenFromClaudeJson(parseJson(readTextFile(cliFiles[c]))).length > 0) hasCli = true;
+    c = c + 1;
+  }
   const token = readClaudeToken(request.source, secret);
   if (token.length === 0) {
-    return fail(request.id, request.nowMs, "not_found", "Install Claude Code and sign in, then Refresh");
+    return fail(
+      request.id,
+      request.nowMs,
+      "not_found",
+      "Install the Claude app or Claude Code and sign in, then Refresh",
+    );
   }
+  const fromDesktop = !hasCli && secret.length === 0;
   const headers = [
     "Authorization: Bearer " + token,
     "anthropic-beta: oauth-2025-04-20",
@@ -416,18 +794,23 @@ function fetchClaude(request: FetchOneRequest): FetchOneResult {
   if (windows.length === 0) {
     return fail(request.id, request.nowMs, "unknown", "Not found");
   }
-  return okResult(request.id, request.nowMs, "claude-code", "Claude", windows);
+  return okResult(request.id, request.nowMs, claudeAccountLabel(fromDesktop), "Claude", windows);
 }
 
 function readCodexToken(source: AuthSource, secret: string): string {
   if (source === "api" || source === "cookie") return secret;
-  const file = parseJson(readTextFile(pathFor("codex")));
-  if (file != null && file.tokens != null) {
-    const token = file.tokens.access_token ?? file.tokens.accessToken;
-    if (token != null && token.length > 0) return token;
-  }
-  if (file != null && file.access_token != null && file.access_token.length > 0) {
-    return file.access_token;
+  const files = pathsFor("codex");
+  let i = 0;
+  while (i < files.length) {
+    const file = parseJson(readTextFile(files[i]));
+    if (file != null && file.tokens != null) {
+      const token = file.tokens.access_token ?? file.tokens.accessToken;
+      if (token != null && token.length > 0) return token;
+    }
+    if (file != null && file.access_token != null && file.access_token.length > 0) {
+      return file.access_token;
+    }
+    i = i + 1;
   }
   return secret;
 }
@@ -461,19 +844,120 @@ function fetchCodex(request: FetchOneRequest): FetchOneResult {
   return okResult(request.id, request.nowMs, "chatgpt", plan, windows);
 }
 
-function readCursorTokenFromDb(): string {
-  const dbPath = pathFor("cursor");
-  if (!existsSync(dbPath)) return "";
+function sqliteQuery(dbPath: string, sql: string): string {
+  const posix = slashPath(dbPath);
+  const tools = ["sqlite3", "sqlite3.exe"];
+  let t = 0;
+  while (t < tools.length) {
+    const direct = runTool(tools[t], ["-readonly", "-noheader", posix, sql], 5000);
+    if (direct.length > 0) return direct;
+    const uri = "file:" + posix + "?mode=ro&immutable=1";
+    const viaUri = runTool(tools[t], ["-readonly", "-noheader", uri, sql], 5000);
+    if (viaUri.length > 0) return viaUri;
+    t = t + 1;
+  }
+  const tmp = join(tmpdir(), "quotabar-cursor-state.vscdb");
   try {
-    const out = execFileSync(
-      "sqlite3",
-      ["-readonly", dbPath, "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1;"],
-      { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024 },
-    );
-    return out.trim();
+    copyFileSync(dbPath, tmp);
+    t = 0;
+    while (t < tools.length) {
+      const copied = runTool(tools[t], ["-readonly", "-noheader", slashPath(tmp), sql], 5000);
+      if (copied.length > 0) {
+        try {
+          unlinkSync(tmp);
+        } catch {
+          // temp
+        }
+        return copied;
+      }
+      t = t + 1;
+    }
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // temp
+    }
+  } catch {
+    // locked or missing sqlite3
+  }
+  const py =
+    "import sqlite3,sys;" +
+    "c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True);" +
+    "r=c.execute(sys.argv[2]).fetchone();" +
+    "print(r[0] if r and r[0] is not None else '')";
+  const pyTools = ["python3", "python", "py"];
+  let p = 0;
+  while (p < pyTools.length) {
+    const args =
+      pyTools[p] === "py" ? ["-3", "-c", py, posix, sql] : ["-c", py, posix, sql];
+    const out = runTool(pyTools[p], args, 5000);
+    if (out.length > 0) return out;
+    p = p + 1;
+  }
+  return "";
+}
+
+function scanCursorJwt(dbPath: string): string {
+  if (!existsSync(dbPath)) return "";
+  let text = "";
+  try {
+    text = readFileSync(dbPath, "utf8");
   } catch {
     return "";
   }
+  const key = "cursorAuth/accessToken";
+  const at = text.indexOf(key);
+  const start = at >= 0 ? at : 0;
+  const end = start + 8000 < text.length ? start + 8000 : text.length;
+  const window = text.slice(start, end);
+  const jwtAt = window.indexOf("eyJ");
+  if (jwtAt < 0) return "";
+  let i = jwtAt;
+  let out = "";
+  while (i < window.length) {
+    const ch = window[i];
+    const ok =
+      (ch >= "A" && ch <= "Z") ||
+      (ch >= "a" && ch <= "z") ||
+      (ch >= "0" && ch <= "9") ||
+      ch === "-" ||
+      ch === "_" ||
+      ch === ".";
+    if (!ok) break;
+    out = out + ch;
+    i = i + 1;
+  }
+  const parts = out.split(".");
+  if (parts.length >= 2 && out.length > 40) return out;
+  return "";
+}
+
+function readCursorTokenFromDb(): string {
+  const sql = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1;";
+  const dbs = pathsFor("cursor");
+  let i = 0;
+  while (i < dbs.length) {
+    if (!existsSync(dbs[i])) {
+      i = i + 1;
+      continue;
+    }
+    const fromSql = sqliteQuery(dbs[i], sql);
+    if (fromSql.length > 0) return fromSql;
+    const scanned = scanCursorJwt(dbs[i]);
+    if (scanned.length > 0) return scanned;
+    i = i + 1;
+  }
+  const agents = pathsFor("cursor_agent");
+  i = 0;
+  while (i < agents.length) {
+    const file = parseJson(readTextFile(agents[i]));
+    if (file != null) {
+      const token = file.accessToken ?? file.access_token;
+      if (token != null && token.length > 0) return token;
+    }
+    i = i + 1;
+  }
+  return "";
 }
 
 function cursorCookie(request: FetchOneRequest): string {
@@ -577,7 +1061,14 @@ function fetchCursor(request: FetchOneRequest): FetchOneResult {
 function geminiToken(request: FetchOneRequest): string {
   const secret = secretText(request);
   if (request.source === "api" || request.source === "cookie") return secret;
-  const file = parseJson(readTextFile(pathFor("gemini")));
+  let file: LooseJson | null = null;
+  const files = pathsFor("gemini");
+  let i = 0;
+  while (i < files.length) {
+    file = parseJson(readTextFile(files[i]));
+    if (file != null) break;
+    i = i + 1;
+  }
   if (file == null) return secret;
   const expiry = file.expiry_date ?? file.expiryDate ?? 0;
   const access = file.access_token ?? "";

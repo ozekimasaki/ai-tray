@@ -45,7 +45,24 @@
                     </else>
                   </if>
                   <else>
-                    <progress value="{b.usedFraction}" label="{b.title}"/>
+                    <row height="10" background="border" radius="sm">
+                      <if test="{b.usedPercent > 0}">
+                        <if test="{b.tone == 'destructive'}">
+                          <column grow="{b.usedPercent}" height="10" background="destructive"/>
+                        </if>
+                        <else>
+                          <if test="{b.tone == 'warning'}">
+                            <column grow="{b.usedPercent}" height="10" background="warning"/>
+                          </if>
+                          <else>
+                            <column grow="{b.usedPercent}" height="10" background="accent"/>
+                          </else>
+                        </else>
+                      </if>
+                      <if test="{b.leftPercent > 0}">
+                        <column grow="{b.leftPercent}" height="10" background="surface"/>
+                      </if>
+                    </row>
                     <if test="{b.tone == 'destructive'}">
                       <text foreground="destructive">{b.resetLabel}</text>
                     </if>
