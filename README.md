@@ -99,11 +99,11 @@ Windows / macOS では Compact を Close すると GPU 窓は破棄され、ト�
 
 ネイティブ Windows（x64）で開発・実行・パッケージします。WSL は不要です。Zig 0.16.0 の `aarch64-windows` は上流が壊れているので ARM マシンは対象外です。
 
-`native` は WinGet のパッケージ名ではない。PowerShell が Diskuv.OCaml などを提案しても **入れない**。入れるのは npm の `@native-sdk/cli@0.9.3`（コマンドは `native.cmd`）。
+`native` は WinGet のパッケージ名ではない。PowerShell が Diskuv.OCaml などを提案しても **入れない**。入れるのは `@native-sdk/cli@0.9.3`（npm なら `native.cmd`、Bun なら `%USERPROFILE%\.bun\bin`）。
 
 1. [Node.js 24](https://nodejs.org/)（scriptc が `node` を呼ぶ）。`npm` が無いなら先にこれ。CLI だけ Bun で入れても Node 24 は PATH に残す
 2. Zig 0.16.0。CLI は Windows 向けアーカイブを持たないので、[mise](https://mise.jdx.dev/) か [ziglang.org](https://ziglang.org/download/) の `zig-x86_64-windows-0.16.0.zip` を PATH へ。Visual Studio / clang は `SCRIPTC_CC=zigcc` なら不要
-3. Native SDK CLI 0.9.3（下の PowerShell / Git Bash）。Bun なら `bun install -g @native-sdk/cli@0.9.3`（`%USERPROFILE%\.bun\bin` を PATH へ）
+3. Native SDK CLI 0.9.3（下の PowerShell / Git Bash）。Bun なら `bun i -g @native-sdk/cli@0.9.3` のあと `$env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path`
 4. 実データの Cursor 用に `sqlite3`（`winget install SQLite.SQLite` など。これは sqlite 用で、`native` 用ではない）。`curl` は Windows 10 以降に付属。Antigravity は `agy`
 
 Git Bash（CLI をグローバルに入れたあと）:
@@ -115,7 +115,28 @@ native build                       # ReleaseFast → zig-out/bin/quotabar.exe
 native package --target windows    # 上の exe をディレクトリに包む
 ```
 
-PowerShell。先に CLI を入れて、同じセッションの PATH を更新する。`$env:SCRIPTC_CC` だけでは `native` は増えない。
+PowerShell。先に CLI を入れて、同じセッションの PATH を更新する。`$env:SCRIPTC_CC` だけでは `native` は増えない。Bun はグローバル入れたあと `C:\Users\<you>\.bun\bin` を PATH に足せと警告する。
+
+Bun:
+
+```powershell
+bun i -g @native-sdk/cli@0.9.3
+$env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path   # このセッションだけ
+# 任意: 以降のターミナルでも使うなら User PATH に残す
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  "$env:USERPROFILE\.bun\bin;" + [Environment]::GetEnvironmentVariable("Path", "User"),
+  "User"
+)
+Get-Command native   # C:\Users\<you>\.bun\bin\native.exe が見えること
+
+$env:SCRIPTC_CC = "zigcc"
+native dev
+native build
+native package --target windows
+```
+
+npm:
 
 ```powershell
 npm i -g @native-sdk/cli@0.9.3
