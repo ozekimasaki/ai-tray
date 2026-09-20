@@ -19,13 +19,15 @@ Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。C
 ## 必要環境
 
 - Node.js 24（Native SDK の frontend / scriptc。出荷バイナリには入らない）
-- Native SDK CLI 0.9.3: `npm install -g @native-sdk/cli`
-- Zig は CLI が用意する
+- Native SDK CLI 0.9.3: `npm install -g @native-sdk/cli@0.9.3` または `bun install -g @native-sdk/cli@0.9.3`
+- Zig 0.16.0。macOS / Linux では CLI が `~/.native/toolchains/` に入れる。**Windows では CLI が Zig をダウンロードできない**（アーカイブ表が macOS / Linux だけ）ので、自分で入れる
 - macOS 11.0 以上（`.app` のビルドは **Mac 上** で行う。Linux からはクロスコンパイルできない）
 - Linux で `native dev` するとき: GTK4 開発パッケージ（Ubuntu なら `libgtk-4-dev`）
-- 実データ取得時: `curl`（HTTPS）。Cursor は `state.vscdb` を直接読む（`sqlite3` があれば使うが必須ではない）。Antigravity は `agy`
+- 実データ取得時: `curl`（HTTPS。Windows 10 以降は `curl.exe` あり）。Cursor は `state.vscdb` を直接読む（`sqlite3` があれば使うが必須ではない）。Antigravity は `agy`
 
-再現可能なシェルは jetify Devbox です。
+jetify Devbox は **Linux / macOS、および Windows 上の WSL2** 向けです。ネイティブ Windows では Nix が無いので `devbox.json` は使えません。Windows は下の「Windows での開発」を見てください。WSL で Devbox を回しても Linux GTK ビルドになり、通知領域トレイや Direct2D は検証できません。
+
+Linux / macOS の再現シェル:
 
 ```sh
 devbox shell
@@ -34,10 +36,10 @@ devbox run check
 devbox run dev
 ```
 
-Devbox が無い場合:
+Devbox が無い Linux / macOS:
 
 ```sh
-npm install -g @native-sdk/cli
+npm install -g @native-sdk/cli@0.9.3
 native check
 native dev
 ```
@@ -72,14 +74,18 @@ Cursor の Grok は usage-summary のあとに best-effort で `POST https://cur
 
 Linux ではトレイが無いので Close すると戻る手段がありません（GTK は `close_policy = hide` を拒否します）。Windows と macOS ではトレイ（通知領域 / メニューバー extra）が復帰手段です。パネルの Close は GPU 窓を破棄します（隠したまま回さない）。macOS は `dock_visible = false`（`LSUIElement`）なので Dock には出ません。Quit はトレイ、または Settings です。
 
+Windows では Devbox は不要です。先に `native build` してから包みます（Git Bash / PowerShell 例は「Windows での開発」）。
+
 ```sh
-native package --target windows
-native package --target macos --signing adhoc --archive
+SCRIPTC_CC=zigcc native build
+SCRIPTC_CC=zigcc native package --target windows
 ```
 
-または `devbox run package-windows` / `devbox run package-macos`。macOS の `.app` / DMG は **macOS ホストで** 作ってください。Linux 上の `native package --target macos` は失敗します。成果物の使い方は Native SDK の `native package --help` を見てください。
+成果物はディレクトリ（exe + アイコン + assets）。MSI / MSIX は出ません。`--signing` は **macOS 専用**（`none` / `adhoc` / `identity`）。Windows の Authenticode は Native SDK 0.9.3 に無いので、配布 exe は SmartScreen に引っかかります。`signtool` は手元で別途です。
 
-配布するときは署名を付けます。
+Linux / macOS で Devbox を使っているときだけ `devbox run package-windows` / `devbox run package-macos` でも同じです。macOS の `.app` / DMG は **macOS ホストで** 作ってください。Linux 上の `native package --target macos` は失敗します。成果物の使い方は Native SDK の `native package --help` を見てください。
+
+macOS を配布するときは署名を付けます。
 
 ```sh
 native package --target macos --signing identity --identity "Developer ID Application: Your Name" --archive
@@ -88,6 +94,79 @@ native package --target macos --signing identity --identity "Developer ID Applic
 ローカル確認だけなら `--signing adhoc`（または `none`）。Gatekeeper は adhoc を開発用として扱います。最低 OS は macOS 11.0 です。Linux 上で `--signing none` しても、包むバイナリは Linux 用なので Mac では動きません。
 
 Windows / macOS では Compact を Close すると GPU 窓は破棄され、トレイのパーセント（データが無ければ `QB`）だけが残ります。次の起動もその状態を persist します。パネルを出すのはトレイの Open panel です。
+
+## Windows での開発
+
+ネイティブ Windows（x64）で開発・実行・パッケージします。WSL は不要です。Zig 0.16.0 の `aarch64-windows` は上流が壊れているので ARM マシンは対象外です。
+
+`native` は WinGet のパッケージ名ではない。PowerShell が Diskuv.OCaml などを提案しても **入れない**。入れるのは `@native-sdk/cli@0.9.3`（npm なら `native.cmd`、Bun なら `%USERPROFILE%\.bun\bin`）。
+
+1. [Node.js 24](https://nodejs.org/)（scriptc が `node` を呼ぶ）。`npm` が無いなら先にこれ。CLI だけ Bun で入れても Node 24 は PATH に残す
+2. Zig 0.16.0。CLI は Windows 向けアーカイブを持たないので、[mise](https://mise.jdx.dev/) か [ziglang.org](https://ziglang.org/download/) の `zig-x86_64-windows-0.16.0.zip` を PATH へ。Visual Studio / clang は `SCRIPTC_CC=zigcc` なら不要
+3. Native SDK CLI 0.9.3（下の PowerShell / Git Bash）。Bun なら `bun i -g @native-sdk/cli@0.9.3` のあと `$env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path`
+4. 実データの Cursor に `curl`（Windows 10 以降に付属）。`state.vscdb` は `sqlite3` が無くても読める（`python3` → バイナリスキャンにフォールバック）。`winget install SQLite.SQLite` で入れると優先して使われる（これは sqlite 用で、`native` 用ではない）。Antigravity は `agy`
+
+Git Bash（CLI をグローバルに入れたあと）:
+
+```sh
+export SCRIPTC_CC=zigcc
+native dev                         # Debug。スクロールは遅い
+native build                       # ReleaseFast → zig-out/bin/quotabar.exe
+native package --target windows    # 上の exe をディレクトリに包む
+```
+
+PowerShell。先に CLI を入れて、同じセッションの PATH を更新する。`$env:SCRIPTC_CC` だけでは `native` は増えない。Bun はグローバル入れたあと `C:\Users\<you>\.bun\bin` を PATH に足せと警告する。
+
+Bun:
+
+```powershell
+bun i -g @native-sdk/cli@0.9.3
+$env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path   # このセッションだけ
+# 任意: 以降のターミナルでも使うなら User PATH に残す
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  "$env:USERPROFILE\.bun\bin;" + [Environment]::GetEnvironmentVariable("Path", "User"),
+  "User"
+)
+Get-Command native   # C:\Users\<you>\.bun\bin\native.exe が見えること
+
+$env:SCRIPTC_CC = "zigcc"
+native dev
+native build
+native package --target windows
+```
+
+npm:
+
+```powershell
+npm i -g @native-sdk/cli@0.9.3
+$env:Path = "$env:APPDATA\npm;" + [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+Get-Command native   # C:\Users\<you>\AppData\Roaming\npm\native.cmd が見えること
+
+$env:SCRIPTC_CC = "zigcc"
+native dev
+native build
+native package --target windows
+```
+
+`native` がまだ無い／入れたくないときは `npx`（グローバル PATH 不要）:
+
+```powershell
+$env:SCRIPTC_CC = "zigcc"
+npx --yes @native-sdk/cli@0.9.3 dev
+npx --yes @native-sdk/cli@0.9.3 build
+npx --yes @native-sdk/cli@0.9.3 package --target windows
+```
+
+`native check` は Windows では壊れます（バックスラッシュパスを `/` 専用の import resolver に渡す）。代わりにスラッシュで:
+
+```sh
+native markup check src/windows/compact.native src/windows/dashboard.native src/windows/settings.native src/app.native src/windows/components/title-bar.native src/windows/components/provider-card.native
+```
+
+ホイールの慣性をブラウザ風にするパッチは `tools/patch-native-sdk-scroll.sh`（CLI 再インストール後に再実行）。パスは Bun グローバル前提です。npm グローバルなら `tokens.zig` の場所を合わせてください。
+
+実データの Cursor は `%APPDATA%\Cursor\User\globalStorage\state.vscdb`。トレイのパーセント（データが無ければ `QB`）からパネルを出します。
 
 ## macOS での開発
 
