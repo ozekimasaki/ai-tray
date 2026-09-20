@@ -11,7 +11,7 @@
         <column gap="6">
           <text><span weight="medium">Data</span></text>
           <switch checked="{demoMode}" on-toggle="toggle_demo">Demo data</switch>
-          <text foreground="text_muted" wrap="true">Demo paints nine sample cards with no network. Turn it off to read local CLI sessions, cookies, and API keys.</text>
+          <text foreground="text_muted" wrap="true">Demo paints nine sample cards with no network. Turn it off to read local CLI sessions, the Claude desktop app, cookies, and API keys.</text>
           <switch checked="{forceError}" on-toggle="toggle_force_error">Preview error state</switch>
           <row gap="8" cross="center">
             <text grow="1">Refresh interval</text>

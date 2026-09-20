@@ -1,6 +1,6 @@
 # QuotaBar
 
-Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。Claude / Codex / Cursor / Antigravity / Gemini / OpenCode / Alibaba Coding Plan / Kie / Devin の 9 ソースを、ローカル CLI セッション・手動 Cookie・API キーから読みます。エンジンは [Native SDK](https://github.com/vercel-labs/native)（Zig + TypeScript コア、WebView なし）です。
+Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。Claude / Codex / Cursor / Antigravity / Gemini / OpenCode / Alibaba Coding Plan / Kie / Devin の 9 ソースを、ローカル CLI セッション・Claude デスクトップアプリ・手動 Cookie・API キーから読みます。エンジンは [Native SDK](https://github.com/vercel-labs/native)（Zig + TypeScript コア、WebView なし）です。
 
 画面の文言は英語です。同梱フォントは Geist Regular / Geist Mono だけで、CJK グリフが無いため日本語を置くと tofu になります。
 
@@ -8,7 +8,7 @@ Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。C
 
 - 半透明の chromeless 窓（外側はデスクトップが透ける。内側は surface のベール）
 - トレイ: 残りが最少のパーセント。Windows は通知領域、macOS はメニューバー extra（`NSStatusItem`）。左クリックで compact、Quit で終了
-- Compact / Dashboard / Settings の 3 窓
+- Compact / Dashboard の各カードは **バー**（使用量の割合）と残量ラベル。Kie だけは上限が無いので残クレジット整数
 - 初回は Demo data（ネットワークなし）。Settings で切ると実データを取る
 - Cursor カードは **Cursor / Other / Grok**（`usage-summary` の auto/api プールと、任意の `get-sand-usage-status`。xAI 単体課金ではない）
 - Kie カードは残クレジット整数（`GET api.kie.ai/api/v1/chat/credit`。上限が無いのでプログレスバーは出さない）
@@ -23,7 +23,7 @@ Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。C
 - Zig は CLI が用意する
 - macOS 11.0 以上（`.app` のビルドは **Mac 上** で行う。Linux からはクロスコンパイルできない）
 - Linux で `native dev` するとき: GTK4 開発パッケージ（Ubuntu なら `libgtk-4-dev`）
-- 実データ取得時: `curl`（HTTPS）、Cursor は `sqlite3`（`state.vscdb` を read-only。macOS は `/usr/bin/sqlite3` が標準）、Antigravity は `agy`
+- 実データ取得時: `curl`（HTTPS）。Cursor は `state.vscdb` を直接読む（`sqlite3` があれば使うが必須ではない）。Antigravity は `agy`
 
 再現可能なシェルは jetify Devbox です。
 
@@ -56,9 +56,9 @@ native dev
 
 | プロバイダ | 自動で読むもの | 手動 |
 | --- | --- | --- |
-| Claude | `~/.claude/.credentials.json` の OAuth。`GET api.anthropic.com/api/oauth/usage` | session cookie |
+| Claude | Claude デスクトップの `config.json`（`oauth:tokenCacheV2` / `oauth:tokenCache`。Windows は Electron safeStorage / DPAPI。macOS は Keychain `Claude Safe Storage`）と `~/.claude/.credentials.json`。`GET api.anthropic.com/api/oauth/usage` | session cookie |
 | Codex | `~/.codex/auth.json` または `$CODEX_HOME/auth.json`。`GET chatgpt.com/backend-api/wham/usage` | — |
-| Cursor | `state.vscdb` の `cursorAuth/accessToken`（期限切れは使わない）。Windows は `%APPDATA%\Cursor\...`、macOS は `~/Library/Application Support/Cursor/...`、Linux は `~/.config/Cursor/...` | `WorkosCursorSessionToken` または Cookie ヘッダ |
+| Cursor | `state.vscdb` の `cursorAuth/accessToken`（期限切れは使わない）。Windows は `%APPDATA%\Cursor\...` と `%USERPROFILE%\AppData\...` を両方探す（`sqlite3` なしでも読む）。加えて `cursor-agent` の `auth.json`。macOS は `~/Library/Application Support/Cursor/...`、Linux は `~/.config/Cursor/...` | `WorkosCursorSessionToken` または Cookie ヘッダ |
 | Antigravity | PATH の `agy -p /usage --output-format json`。失敗時は Gemini OAuth | — |
 | Gemini | `~/.gemini/oauth_creds.json`。期限切れは Gemini CLI の公開クライアントで refresh。個人向け廃止は Antigravity へ誘導 | — |
 | OpenCode | なし | Zen API キー、または opencode.ai の Cookie |
@@ -95,6 +95,10 @@ Windows / macOS では Compact を Close すると GPU 窓は破棄され、ト�
 
 この Linux 環境では `.app` の起動もメニューバー extra も検証していません。
 
+## Windows での開発
+
+実データの Cursor は `%APPDATA%\Cursor\User\globalStorage\state.vscdb`（APPDATA が空でも `%USERPROFILE%\AppData\Roaming\Cursor\...` を探す）。`sqlite3` は任意。Claude デスクトップは `%APPDATA%\Claude\config.json`（MSIX なら `LocalCache\Roaming\Claude`）。`curl` は Windows 標準です。
+
 ## Linux での開発
 
 この環境ではトレイを検証できません。初回は compact が見えます。確認すること:
@@ -122,5 +126,5 @@ native dev
 - `src/app.native` — 隠した GPU ホスト（空）
 - `src/windows/compact.native` — トレイパネル（二次 GPU。Close で破棄）
 - `src/windows/dashboard.native` / `settings.native`
-- `src/services/usage.ts` — `fetchOne`（同期。curl / sqlite3 / agy）
+- `src/services/usage.ts` — `fetchOne`（同期。curl / sqlite3 任意 / agy）
 - `src/demo.ts` — デモ 9 カード

@@ -242,7 +242,7 @@ function sourceBadge(source: AuthSource): Uint8Array {
 function missingHint(id: ProviderId): Uint8Array {
   switch (id) {
     case "claude":
-      return asciiBytes("Install Claude Code and sign in, then Refresh");
+      return asciiBytes("Install the Claude app or Claude Code and sign in, then Refresh");
     case "codex":
       return asciiBytes("Sign in with Codex CLI (auth.json), then Refresh");
     case "cursor":
@@ -265,11 +265,11 @@ function missingHint(id: ProviderId): Uint8Array {
 function settingsHint(id: ProviderId): Uint8Array {
   switch (id) {
     case "claude":
-      return asciiBytes("Reads ~/.claude/.credentials.json. Optional session key in the secret field.");
+      return asciiBytes("Reads Claude app config or ~/.claude/.credentials.json. Optional session key in the secret field.");
     case "codex":
       return asciiBytes("Reads ~/.codex/auth.json or $CODEX_HOME/auth.json.");
     case "cursor":
-      return asciiBytes("Reads Cursor state.vscdb, or a WorkosCursorSessionToken cookie.");
+      return asciiBytes("Reads Cursor state.vscdb (no sqlite3 required), cursor-agent auth.json, or a WorkosCursorSessionToken cookie.");
     case "antigravity":
       return asciiBytes("Runs agy -p /usage, then Gemini OAuth quota.");
     case "gemini":
@@ -358,6 +358,7 @@ function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBa
         id: w.id,
         title: w.title,
         usedPercent: 0,
+        leftPercent: 0,
         usedFraction: 0,
         leftLabel: creditsLabel(remaining),
         resetLabel: asciiBytes("No reset"),
@@ -372,6 +373,7 @@ function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBa
         id: w.id,
         title: w.title,
         usedPercent: used,
+        leftPercent: used >= 100 ? 0 : 100 - used,
         usedFraction: permilleFraction(used * 10),
         leftLabel: leftLabel(used),
         resetLabel: formatReset(nowMs, w.resetsAtMs),
@@ -432,6 +434,7 @@ export function visibleBars(model: Model): readonly FlatBar[] {
         slot: c.slot,
         title: b.title,
         usedPercent: b.usedPercent,
+        leftPercent: b.leftPercent,
         usedFraction: b.usedFraction,
         leftLabel: b.leftLabel,
         resetLabel: b.resetLabel,
