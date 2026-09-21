@@ -8,7 +8,7 @@ Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。C
 
 - 半透明の chromeless 窓（外側はデスクトップが透ける。内側は surface のベール）
 - トレイ: 残りが最少のパーセント。Windows は通知領域、macOS はメニューバー extra（`NSStatusItem`）。左クリックで compact、Quit で終了
-- Compact / Dashboard の各カードは **バー**（使用量の割合）と残量ラベル。Kie だけは上限が無いので残クレジット整数
+- Compact / Dashboard の各カードは **バー**（使用量の割合）と残量ラベル。Kie だけは上限が無いので残クレジット整数。再開時刻が unknown の窓（Claude の未使用セッションなど）はリセット行を出さない
 - 初回は Demo data（ネットワークなし）。Settings で切ると実データを取る
 - Cursor カードは **Cursor / Other / Grok**（`usage-summary` の auto/api プールと、任意の `get-sand-usage-status`。xAI 単体課金ではない）
 - Kie カードは残クレジット整数（`GET api.kie.ai/api/v1/chat/credit`。上限が無いのでプログレスバーは出さない）
@@ -23,7 +23,7 @@ Windows / macOS / Linux 向けのトレイ常駐 AI 利用量モニタです。C
 - Zig 0.16.0。macOS / Linux では CLI が `~/.native/toolchains/` に入れる。**Windows では CLI が Zig をダウンロードできない**（アーカイブ表が macOS / Linux だけ）ので、自分で入れる
 - macOS 11.0 以上（`.app` のビルドは **Mac 上** で行う。Linux からはクロスコンパイルできない）
 - Linux で `native dev` するとき: GTK4 開発パッケージ（Ubuntu なら `libgtk-4-dev`）
-- 実データ取得時: `curl`（HTTPS。Windows 10 以降は `curl.exe` あり）。Cursor は `state.vscdb` を直接読む（`sqlite3` があれば使うが必須ではない）。Antigravity は `agy`
+- 実データ取得時: `curl`（HTTPS。Windows 10 以降は `curl.exe` あり）。Cursor は `state.vscdb` を直接読む（`sqlite3` があれば使うが必須ではない）。Antigravity は Antigravity IDE が起動中ならローカルの言語サーバーに尋ねる（macOS/Linux では `ps` に加えて `lsof` か `ss` を使う）
 
 jetify Devbox は **Linux / macOS、および Windows 上の WSL2** 向けです。ネイティブ Windows では Nix が無いので `devbox.json` は使えません。Windows は下の「Windows での開発」を見てください。WSL で Devbox を回しても Linux GTK ビルドになり、通知領域トレイや Direct2D は検証できません。
 
@@ -58,11 +58,11 @@ native dev
 
 | プロバイダ | 自動で読むもの | 手動 |
 | --- | --- | --- |
-| Claude | Claude デスクトップの `config.json`（`oauth:tokenCacheV2` / `oauth:tokenCache`。Windows は Electron safeStorage / DPAPI。macOS は Keychain `Claude Safe Storage`）と `~/.claude/.credentials.json`。`GET api.anthropic.com/api/oauth/usage` | session cookie |
-| Codex | `~/.codex/auth.json` または `$CODEX_HOME/auth.json`。`GET chatgpt.com/backend-api/wham/usage` | — |
+| Claude | `~/.claude/.credentials.json`（`claudeAiOauth.expiresAt` が切れていれば無視）。次に Claude デスクトップの `config.json`（`oauth:tokenCacheV2` / `oauth:tokenCache`。Windows は Electron safeStorage / DPAPI。macOS は Keychain `Claude Safe Storage`）。どれも 401 なら **CLI の `refreshToken` で `console.anthropic.com/v1/oauth/token` を叩いて救う**（更新後はメモリに保持。ファイルは書き換えない）。`GET api.anthropic.com/api/oauth/usage` | session cookie | 枠は `limits[]` を優先的に読む（`kind` が `session` / `weekly_all`、`weekly_scoped` は `scope.model.display_name` をそのままタイトルにするので **Fable** 枠が別バーで出る）。`limits` が無いときだけ `five_hour` / `seven_day` に落ちる。usage は 429 が来やすい。
+| Codex | `~/.codex/auth.json` または `$CODEX_HOME/auth.json`。`GET chatgpt.com/backend-api/wham/usage`。窓名は `limit_window_seconds` から `Session (5h)` / `Weekly (7d)` に変換する | — |
 | Cursor | `state.vscdb` の `cursorAuth/accessToken`（期限切れは使わない）。Windows は `%APPDATA%\Cursor\...` と `%USERPROFILE%\AppData\...` を両方探す（`sqlite3` なしでも読む）。加えて `cursor-agent` の `auth.json`。macOS は `~/Library/Application Support/Cursor/...`、Linux は `~/.config/Cursor/...` | `WorkosCursorSessionToken` または Cookie ヘッダ |
-| Antigravity | PATH の `agy -p /usage --output-format json`。失敗時は Gemini OAuth | — |
-| Gemini | `~/.gemini/oauth_creds.json`。期限切れは Gemini CLI の公開クライアントで refresh。個人向け廃止は Antigravity へ誘導 | — |
+| Antigravity | **Antigravity IDE が起動中なら、その言語サーバーにローカルで聞く**: `--csrf_token` を持つプロセスの listen ポートへ `X-Codeium-Csrf-Token` を添えて `RetrieveUserQuotaSummary` を POST し、`groups[].buckets[]` の `remainingFraction` / `resetTime` から Gemini と Claude/GPT の週・セッションの 4 本を出す。IDE が閉じているときはアプリの `state.vscdb` → `antigravityAuthStatus.apiKey`（ya29）で cloudcode-pa、次に Gemini OAuth へフォールバック。**`agy` CLI には headless で使用量を出す口が無い**（`agy -p /usage` はスラッシュコマンド展開されず通常プロンプトになる）ので起動しない。cloudcode-pa の `retrieveUserQuota` はこのアカウントで 403（license 扱い） | — |
+| Gemini | `~/.gemini/oauth_creds.json`。期限切れの refresh は `usage.ts` の公開クライアント（`GEMINI_CLIENT_ID` / `SECRET`）を埋めたビルドだけ。空のビルドでは出ない。個人向け廃止は Antigravity へ誘導 | — |
 | OpenCode | なし | Zen API キー、または opencode.ai の Cookie |
 | Alibaba | なし | Model Studio API キー優先、次にコンソール Cookie。Region で intl/cn |
 | Kie | なし | kie.ai API キー。`GET /api/v1/chat/credit` の残クレジット（パーセント枠ではない。リセットなし） |
@@ -104,7 +104,7 @@ Windows / macOS では Compact を Close すると GPU 窓は破棄され、ト�
 1. [Node.js 24](https://nodejs.org/)（scriptc が `node` を呼ぶ）。`npm` が無いなら先にこれ。CLI だけ Bun で入れても Node 24 は PATH に残す
 2. Zig 0.16.0。CLI は Windows 向けアーカイブを持たないので、[mise](https://mise.jdx.dev/) か [ziglang.org](https://ziglang.org/download/) の `zig-x86_64-windows-0.16.0.zip` を PATH へ。Visual Studio / clang は `SCRIPTC_CC=zigcc` なら不要
 3. Native SDK CLI 0.9.3（下の PowerShell / Git Bash）。Bun なら `bun i -g @native-sdk/cli@0.9.3` のあと `$env:Path = "$env:USERPROFILE\.bun\bin;" + $env:Path`
-4. 実データの Cursor に `curl`（Windows 10 以降に付属）。`state.vscdb` は `sqlite3` が無くても読める（`python3` → バイナリスキャンにフォールバック）。`winget install SQLite.SQLite` で入れると優先して使われる（これは sqlite 用で、`native` 用ではない）。Antigravity は `agy`
+4. 実データの Cursor に `curl`（Windows 10 以降に付属）。`state.vscdb` は `sqlite3` が無くても読める（`python3` → バイナリスキャンにフォールバック）。`winget install SQLite.SQLite` で入れると優先して使われる（これは sqlite 用で、`native` 用ではない）。Antigravity は IDE を起動していれば追加のツールは要らない（`powershell` で言語サーバーのポートを引く）
 
 Git Bash（CLI をグローバルに入れたあと）:
 
@@ -170,7 +170,7 @@ native markup check src/windows/compact.native src/windows/dashboard.native src/
 
 ## macOS での開発
 
-`native dev` を Mac 上で実行します。メニューバー extra にパーセント（データが無ければ `QB`）が出ます。パネルは `windows(model)` の compact 二次窓です。Close すると GPU 面を破棄してトレイに戻ります。終了は extra の Quit、または Settings の Quit。実データの Cursor は `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`。`curl` と `sqlite3` は macOS 標準です。`agy` は PATH へ入れてください。
+`native dev` を Mac 上で実行します。メニューバー extra にパーセント（データが無ければ `QB`）が出ます。パネルは `windows(model)` の compact 二次窓です。Close すると GPU 面を破棄してトレイに戻ります。終了は extra の Quit、または Settings の Quit。実データの Cursor は `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`。`curl` と `sqlite3` は macOS 標準です。Antigravity は IDE を起動中なら `ps` と `lsof` で言語サーバーのポートを引きます。
 
 この Linux 環境では `.app` の起動もメニューバー extra も検証していません。
 
@@ -205,5 +205,5 @@ native dev
 - `src/app.native` — 隠した GPU ホスト（空）
 - `src/windows/compact.native` — トレイパネル（二次 GPU。Close で破棄）
 - `src/windows/dashboard.native` / `settings.native`
-- `src/services/usage.ts` — `fetchOne`（同期。curl / sqlite3 任意 / agy）
+- `src/services/usage.ts` — `fetchOne`（同期。curl / sqlite3 任意 / Antigravity はローカル言語サーバー）
 - `src/demo.ts` — デモ 9 カード

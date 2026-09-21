@@ -70,7 +70,8 @@ export function formatAgo(nowMs: number, thenMs: number): Uint8Array {
 }
 
 export function formatReset(nowMs: number, resetsAtMs: number): Uint8Array {
-  if (resetsAtMs <= 0) return asciiBytes("Reset unknown");
+  // 再開時刻が無い窓（Claude の five_hour の未使用など）は行そのものを出さない。
+  if (resetsAtMs <= 0) return asciiBytes("");
   if (resetsAtMs <= nowMs) return asciiBytes("Resets soon");
   const sec = intDiv(resetsAtMs - nowMs, 1000);
   if (sec < 60) return asciiBytes(`Resets in ${sec}s`);

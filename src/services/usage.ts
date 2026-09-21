@@ -2,7 +2,7 @@
 
 import { execFileSync } from "child_process";
 import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { platform, tmpdir } from "os";
 import { join } from "path";
 import type {
   AlibabaRegion,
@@ -27,6 +27,7 @@ type LooseWindow = {
   usedPercent?: number;
   percent?: number;
   percentUsed?: number;
+  limit_window_seconds?: number;
   resets_at?: string;
   reset_at?: number;
   resetsAt?: string;
@@ -38,12 +39,32 @@ type LooseWindow = {
   apiPercentUsed?: number;
 };
 
+type LooseLimit = {
+  kind?: string;
+  group?: string;
+  percent?: number;
+  severity?: string;
+  resets_at?: string;
+  is_active?: boolean;
+  scope?: { model?: { id?: string; display_name?: string } };
+};
+
 type LooseJson = {
-  claudeAiOauth?: { accessToken?: string; access_token?: string };
+  claudeAiOauth?: {
+    accessToken?: string;
+    access_token?: string;
+    expiresAt?: number;
+    expiry_date?: number;
+    refreshToken?: string;
+    refresh_token?: string;
+    refreshTokenExpiresAt?: number;
+    refresh_token_expires_at?: number;
+  };
   tokens?: { access_token?: string; accessToken?: string };
   access_token?: string;
   accessToken?: string;
   refresh_token?: string;
+  expires_in?: number;
   expiry_date?: number;
   expiryDate?: number;
   five_hour?: LooseWindow;
@@ -75,6 +96,7 @@ type LooseJson = {
   currentTier?: { id?: string };
   ineligibleTiers?: { reasonCode?: string }[];
   buckets?: { displayName?: string; remainingFraction?: number; remaining_fraction?: number }[];
+  limits?: LooseLimit[];
   quotas?: LooseWindow[];
   rolling?: LooseWindow;
   weekly?: LooseWindow;
@@ -105,6 +127,12 @@ type LooseJson = {
 type HttpResult = {
   readonly status: number;
   readonly body: string;
+};
+
+type GeminiCreds = {
+  readonly token: string;
+  /** 手元の credential はあるが refresh 出来ずに期限切れ。 */
+  readonly expired: boolean;
 };
 
 function decodeBytes(bytes: Uint8Array): string {
@@ -194,6 +222,22 @@ function percentFromWindow(w: LooseWindow | undefined): number {
   return -1;
 }
 
+/** 窓の長さ（秒）から人が読む名前。Codex は primary / secondary では分からない。 */
+function windowTitle(seconds: number | undefined, fallback: string): string {
+  if (seconds == null || seconds <= 0) return fallback;
+  if (seconds <= 3600) return "Hourly";
+  if (seconds <= 18000) return "Session (5h)";
+  if (seconds <= 86400) return "Daily (24h)";
+  if (seconds <= 604800) return "Weekly (7d)";
+  if (seconds <= 2592000) return "Monthly (30d)";
+  return fallback;
+}
+
+function windowTitleOf(w: LooseWindow | undefined, fallback: string): string {
+  if (w == null) return fallback;
+  return windowTitle(w.limit_window_seconds, fallback);
+}
+
 /** display message の `%` 直前の数字。正規表現は使わない。 */
 function percentFromDisplayMessage(message: string | undefined): number {
   if (message == null || message.length === 0) return -1;
@@ -278,10 +322,61 @@ function readTextFile(path: string): string {
   }
 }
 
+function isJsonSpace(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+/**
+ * scriptc の JSON.parse は宣言型の無い場所の null を "expected object | undefined" で弾く。
+ * `"key": null` のペアを先に落としてから parse する。
+ */
+function dropNullPairs(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== "\"") {
+      out = out + text[i];
+      i = i + 1;
+      continue;
+    }
+    const keyStart = i;
+    let j = i + 1;
+    while (j < text.length && text[j] !== "\"") {
+      if (text[j] === "\\") j = j + 1;
+      j = j + 1;
+    }
+    if (j >= text.length) {
+      out = out + text.slice(keyStart);
+      break;
+    }
+    let k = j + 1;
+    while (k < text.length && isJsonSpace(text[k])) k = k + 1;
+    if (k < text.length && text[k] === ":") {
+      let m = k + 1;
+      while (m < text.length && isJsonSpace(text[m])) m = m + 1;
+      if (text.slice(m, m + 4) === "null") {
+        i = m + 4;
+        while (i < text.length && isJsonSpace(text[i])) i = i + 1;
+        if (i < text.length && text[i] === ",") {
+          i = i + 1;
+        } else {
+          let b = out.length - 1;
+          while (b >= 0 && isJsonSpace(out[b])) b = b - 1;
+          if (b >= 0 && out[b] === ",") out = out.slice(0, b);
+        }
+        continue;
+      }
+    }
+    out = out + text.slice(keyStart, j + 1);
+    i = j + 1;
+  }
+  return out;
+}
+
 function parseJson(text: string): LooseJson | null {
   if (text.length === 0) return null;
   try {
-    return JSON.parse(text) as LooseJson;
+    return JSON.parse(dropNullPairs(text)) as LooseJson;
   } catch {
     return null;
   }
@@ -331,8 +426,9 @@ function httpKind(status: number): ErrorKind {
 function httpErrorText(status: number): string {
   if (status === 401 || status === 403) return "Auth expired";
   if (status === 404) return "Not found";
+  if (status === 429) return "Rate limited. Try again in a minute";
   if (status === 0) return "Network error";
-  return "Network error";
+  return "HTTP " + status;
 }
 
 function pathsFor(kind: PathKind): string[] {
@@ -417,6 +513,35 @@ function tokenFromClaudeJson(file: LooseJson | null): string {
   }
   if (file.access_token != null && file.access_token.length > 0) return file.access_token;
   if (file.accessToken != null && file.accessToken.length > 0) return file.accessToken;
+  return "";
+}
+
+/** ~/.claude/.credentials.json の期限。無いときは 0（無期限扱い）。ms・秒の両方来る。 */
+function claudeExpiryMs(file: LooseJson | null): number {
+  if (file == null) return 0;
+  if (file.claudeAiOauth != null) {
+    const raw = file.claudeAiOauth.expiresAt ?? file.claudeAiOauth.expiry_date;
+    if (raw != null) return resetMsFromUnix(raw, 0);
+  }
+  const flat = file.expiry_date ?? file.expiryDate;
+  if (flat != null) return resetMsFromUnix(flat, 0);
+  return 0;
+}
+
+/** CLI のトークン。期限切れなら空を返す（Desktop のキャッシュを選ばせる）。 */
+function claudeCliTokenFresh(nowMs: number): string {
+  const files = pathsFor("claude");
+  let i = 0;
+  while (i < files.length) {
+    const file = parseJson(readTextFile(files[i]));
+    const token = tokenFromClaudeJson(file);
+    if (token.length > 0) {
+      const expiry = claudeExpiryMs(file);
+      if (expiry > 0 && expiry <= nowMs + 60000) return "";
+      return token;
+    }
+    i = i + 1;
+  }
   return "";
 }
 
@@ -725,35 +850,98 @@ function readClaudeDesktopToken(): string {
   return "";
 }
 
-function readClaudeToken(source: AuthSource, secret: string): string {
-  if (source === "cookie" || source === "api") return secret;
-  const files = pathsFor("claude");
-  let i = 0;
-  while (i < files.length) {
-    const token = tokenFromClaudeJson(parseJson(readTextFile(files[i])));
-    if (token.length > 0) return token;
-    i = i + 1;
-  }
-  const desktop = readClaudeDesktopToken();
-  if (desktop.length > 0) return desktop;
-  return secret;
-}
-
 function claudeAccountLabel(tokenFromDesktop: boolean): string {
   if (tokenFromDesktop) return "claude-app";
   return "claude-code";
 }
 
+/** limits[] が新しい形。Fable のようなモデル別枠は scope.model.display_name に入る。 */
+function limitTitle(limit: LooseLimit): string {
+  const scope = limit.scope;
+  if (scope != null && scope.model != null) {
+    const name = scope.model.display_name ?? "";
+    if (name.length > 0) return name;
+  }
+  const kind = limit.kind ?? "";
+  if (kind === "session") return "Session";
+  if (kind === "weekly_all") return "Weekly";
+  if (kind === "weekly_scoped") return "Weekly";
+  if (kind === "daily") return "Daily";
+  if (kind === "hourly") return "Hourly";
+  if (kind.length > 0) return kind;
+  return "Quota";
+}
+
+function limitBars(json: LooseJson, nowMs: number): QuotaWindow[] {
+  const out: QuotaWindow[] = [];
+  const limits = json.limits;
+  if (limits == null) return out;
+  let i = 0;
+  while (i < limits.length && out.length < 4) {
+    const limit = limits[i];
+    const pct = limit.percent;
+    if (pct != null && pct === pct) {
+      const reset = limit.resets_at != null ? parseTimeMs(limit.resets_at) : 0;
+      out.push(bar(out.length + 1, limitTitle(limit), pct, reset));
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+/** Claude Code 本体（2.1.72 同梱）が使う公開クライアント ID。秘密ではない。 */
+const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+
+/** 更新したトークンは生存中は使い回す。毎サイクル token + usage を叩くと 429 を招く。 */
+let claudeFreshToken = "";
+let claudeFreshExpiryMs = 0;
+
+/** 期限切れの CLI アクセストークンを refreshToken で更新する。資格情報ファイルは書き換えない。 */
+function claudeRefreshedToken(nowMs: number): string {
+  if (claudeFreshToken.length > 0 && claudeFreshExpiryMs > nowMs + 60000) return claudeFreshToken;
+  const files = pathsFor("claude");
+  let i = 0;
+  while (i < files.length) {
+    const file = parseJson(readTextFile(files[i]));
+    const oauth = file != null ? file.claudeAiOauth : undefined;
+    if (oauth != null) {
+      const rt = oauth.refreshToken ?? oauth.refresh_token ?? "";
+      const rawUntil = oauth.refreshTokenExpiresAt ?? oauth.refresh_token_expires_at;
+      const untilMs = rawUntil != null ? resetMsFromUnix(rawUntil, 0) : 0;
+      if (rt.length > 0 && (untilMs === 0 || untilMs > nowMs)) {
+        const body =
+          "{\"grant_type\":\"refresh_token\",\"refresh_token\":\"" + rt +
+          "\",\"client_id\":\"" + CLAUDE_OAUTH_CLIENT_ID + "\"}";
+        const res = http(
+          "POST",
+          "https://console.anthropic.com/v1/oauth/token",
+          ["Content-Type: application/json", "Accept: application/json"],
+          body,
+        );
+        if (res.status >= 200 && res.status < 300) {
+          const json = parseJson(res.body);
+          const fresh = json != null ? json.access_token ?? json.accessToken : undefined;
+          if (fresh != null && fresh.length > 0) {
+            const rawIn = json != null ? json.expires_in : undefined;
+            claudeFreshToken = fresh;
+            claudeFreshExpiryMs = rawIn != null ? nowMs + rawIn * 1000 : nowMs + 900000;
+            return fresh;
+          }
+        }
+      }
+    }
+    i = i + 1;
+  }
+  return "";
+}
+
 function fetchClaude(request: FetchOneRequest): FetchOneResult {
   const secret = secretText(request);
-  const cliFiles = pathsFor("claude");
-  let hasCli = false;
-  let c = 0;
-  while (c < cliFiles.length) {
-    if (tokenFromClaudeJson(parseJson(readTextFile(cliFiles[c]))).length > 0) hasCli = true;
-    c = c + 1;
-  }
-  const token = readClaudeToken(request.source, secret);
+  const manual = request.source === "cookie" || request.source === "api";
+  let token = manual ? secret : claudeCliTokenFresh(request.nowMs);
+  const fromCli = token.length > 0;
+  if (token.length === 0 && !manual) token = readClaudeDesktopToken();
+  if (token.length === 0) token = secret;
   if (token.length === 0) {
     return fail(
       request.id,
@@ -762,7 +950,7 @@ function fetchClaude(request: FetchOneRequest): FetchOneResult {
       "Install the Claude app or Claude Code and sign in, then Refresh",
     );
   }
-  const fromDesktop = !hasCli && secret.length === 0;
+  const fromDesktop = !fromCli && secret.length === 0;
   const headers = [
     "Authorization: Bearer " + token,
     "anthropic-beta: oauth-2025-04-20",
@@ -781,16 +969,35 @@ function fetchClaude(request: FetchOneRequest): FetchOneResult {
       return fail(request.id, request.nowMs, httpKind(res.status), httpErrorText(res.status));
     }
   }
+  if ((res.status === 401 || res.status === 403) && !manual) {
+    const fresh = claudeRefreshedToken(request.nowMs);
+    if (fresh.length > 0) {
+      const retried = http(
+        "GET",
+        "https://api.anthropic.com/api/oauth/usage",
+        [
+          "Authorization: Bearer " + fresh,
+          "anthropic-beta: oauth-2025-04-20",
+          "Accept: application/json",
+          "User-Agent: claude-code/2.1.0",
+        ],
+        "",
+      );
+      if (retried.status >= 200 && retried.status < 300) res = retried;
+    }
+  }
   if (res.status < 200 || res.status >= 300) {
     return fail(request.id, request.nowMs, httpKind(res.status), httpErrorText(res.status));
   }
   const json = parseJson(res.body);
   if (json == null) return fail(request.id, request.nowMs, "unknown", "Network error");
-  const windows: QuotaWindow[] = [];
-  const session = percentFromWindow(json.five_hour);
-  if (session >= 0) windows.push(bar(1, "Session", session, resetMsFromWindow(json.five_hour, request.nowMs)));
-  const weekly = percentFromWindow(json.seven_day);
-  if (weekly >= 0) windows.push(bar(2, "Weekly", weekly, resetMsFromWindow(json.seven_day, request.nowMs)));
+  const windows: QuotaWindow[] = limitBars(json, request.nowMs);
+  if (windows.length === 0) {
+    const session = percentFromWindow(json.five_hour);
+    if (session >= 0) windows.push(bar(1, "Session", session, resetMsFromWindow(json.five_hour, request.nowMs)));
+    const weekly = percentFromWindow(json.seven_day);
+    if (weekly >= 0) windows.push(bar(2, "Weekly", weekly, resetMsFromWindow(json.seven_day, request.nowMs)));
+  }
   if (windows.length === 0) {
     return fail(request.id, request.nowMs, "unknown", "Not found");
   }
@@ -836,9 +1043,9 @@ function fetchCodex(request: FetchOneRequest): FetchOneResult {
   const secondary = rate != null ? rate.secondary_window : json.secondary_window;
   const windows: QuotaWindow[] = [];
   const p = percentFromWindow(primary);
-  if (p >= 0) windows.push(bar(1, "Primary", p, resetMsFromWindow(primary, request.nowMs)));
+  if (p >= 0) windows.push(bar(1, windowTitleOf(primary, "Primary"), p, resetMsFromWindow(primary, request.nowMs)));
   const s = percentFromWindow(secondary);
-  if (s >= 0) windows.push(bar(2, "Secondary", s, resetMsFromWindow(secondary, request.nowMs)));
+  if (s >= 0) windows.push(bar(2, windowTitleOf(secondary, "Secondary"), s, resetMsFromWindow(secondary, request.nowMs)));
   if (windows.length === 0) return fail(request.id, request.nowMs, "unknown", "Not found");
   const plan = json.plan ?? json.planType ?? "Codex";
   return okResult(request.id, request.nowMs, "chatgpt", plan, windows);
@@ -1058,23 +1265,32 @@ function fetchCursor(request: FetchOneRequest): FetchOneResult {
   return okResult(request.id, request.nowMs, account, planName, windows);
 }
 
-function geminiToken(request: FetchOneRequest): string {
+function geminiToken(request: FetchOneRequest): GeminiCreds {
   const secret = secretText(request);
-  if (request.source === "api" || request.source === "cookie") return secret;
-  let file: LooseJson | null = null;
+  if (request.source === "api" || request.source === "cookie") return { token: secret, expired: false };
   const files = pathsFor("gemini");
+  let fresh = "";
+  let refresh = "";
+  let sawExpired = false;
   let i = 0;
   while (i < files.length) {
-    file = parseJson(readTextFile(files[i]));
-    if (file != null) break;
+    const file = parseJson(readTextFile(files[i]));
+    if (file != null) {
+      const expiry = file.expiry_date ?? file.expiryDate ?? 0;
+      const access = file.access_token ?? "";
+      if (access.length > 0 && (expiry === 0 || expiry > request.nowMs + 60000)) {
+        fresh = access;
+        break;
+      }
+      if (access.length > 0) sawExpired = true;
+      const rt = file.refresh_token ?? "";
+      if (rt.length > 0 && refresh.length === 0) refresh = rt;
+    }
     i = i + 1;
   }
-  if (file == null) return secret;
-  const expiry = file.expiry_date ?? file.expiryDate ?? 0;
-  const access = file.access_token ?? "";
-  if (access.length > 0 && (expiry === 0 || expiry > request.nowMs + 60000)) return access;
-  const refresh = file.refresh_token ?? "";
-  if (refresh.length === 0) return secret;
+  if (fresh.length > 0) return { token: fresh, expired: false };
+  if (refresh.length === 0) return { token: secret, expired: sawExpired };
+  if (GEMINI_CLIENT_ID.length === 0) return { token: secret, expired: true };
   const body =
     "client_id=" +
     formEncode(GEMINI_CLIENT_ID) +
@@ -1089,23 +1305,29 @@ function geminiToken(request: FetchOneRequest): string {
     ["Content-Type: application/x-www-form-urlencoded"],
     body,
   );
-  if (res.status < 200 || res.status >= 300) return secret;
+  if (res.status < 200 || res.status >= 300) return { token: secret, expired: true };
   const json = parseJson(res.body);
-  if (json == null || json.access_token == null) return secret;
-  return json.access_token;
+  if (json == null || json.access_token == null) return { token: secret, expired: true };
+  return { token: json.access_token, expired: false };
 }
 
-function fetchGemini(request: FetchOneRequest): FetchOneResult {
-  const token = geminiToken(request);
-  if (token.length === 0) {
-    return fail(request.id, request.nowMs, "not_found", "Sign in with Gemini CLI, then Refresh");
-  }
+/** cloudcode-pa の quota 2 発。Gemini CLI と Antigravity アプリが同じ枠を読む。 */
+function googleQuota(
+  id: ProviderId,
+  nowMs: number,
+  token: string,
+  ideType: string,
+  account: string,
+  plan: string,
+): FetchOneResult {
   const headers = ["Authorization: Bearer " + token, "Content-Type: application/json", "Accept: application/json"];
+  // ideType は API の enum 依存。不正値（例: INTEL_IDE）は 400 になる。空なら metadata を送らない。
+  const assistBody = ideType.length > 0 ? "{\"metadata\":{\"ideType\":\"" + ideType + "\"}}" : "{}";
   const assist = http(
     "POST",
     "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
     headers,
-    "{\"metadata\":{\"ideType\":\"INTEL_IDE\"}}",
+    assistBody,
   );
   const assistJson = parseJson(assist.body);
   if (assistJson != null && assistJson.ineligibleTiers != null) {
@@ -1116,7 +1338,7 @@ function fetchGemini(request: FetchOneRequest): FetchOneResult {
       i = i + 1;
     }
     if (migrated && assistJson.currentTier == null) {
-      return fail(request.id, request.nowMs, "migrated", "Use Antigravity for this Google account");
+      return fail(id, nowMs, "migrated", "Use Antigravity for this Google account");
     }
   }
   const quota = http(
@@ -1127,12 +1349,12 @@ function fetchGemini(request: FetchOneRequest): FetchOneResult {
   );
   if (quota.status < 200 || quota.status >= 300) {
     if (assist.status === 403 || quota.status === 403) {
-      return fail(request.id, request.nowMs, "migrated", "Use Antigravity for this Google account");
+      return fail(id, nowMs, "migrated", "Use Antigravity for this Google account");
     }
-    return fail(request.id, request.nowMs, httpKind(quota.status), httpErrorText(quota.status));
+    return fail(id, nowMs, httpKind(quota.status), httpErrorText(quota.status));
   }
   const json = parseJson(quota.body);
-  if (json == null) return fail(request.id, request.nowMs, "unknown", "Network error");
+  if (json == null) return fail(id, nowMs, "unknown", "Network error");
   const windows: QuotaWindow[] = [];
   if (json.buckets != null) {
     let i = 0;
@@ -1150,30 +1372,194 @@ function fetchGemini(request: FetchOneRequest): FetchOneResult {
   if (windows.length === 0 && json.remaining != null && json.total != null && json.total > 0) {
     windows.push(bar(1, "Daily", clampPercent(100 - (json.remaining / json.total) * 100), 0));
   }
-  if (windows.length === 0) return fail(request.id, request.nowMs, "unknown", "Not found");
-  return okResult(request.id, request.nowMs, "gemini-cli", "Gemini", windows);
+  if (windows.length === 0) return fail(id, nowMs, "unknown", "Not found");
+  return okResult(id, nowMs, account, plan, windows);
+}
+
+function fetchGemini(request: FetchOneRequest): FetchOneResult {
+  const creds = geminiToken(request);
+  const token = creds.token;
+  if (token.length === 0) {
+    if (creds.expired) {
+      return fail(
+        request.id,
+        request.nowMs,
+        "auth",
+        "Gemini token expired. Run the Gemini CLI once, then Refresh",
+      );
+    }
+    return fail(request.id, request.nowMs, "not_found", "Sign in with Gemini CLI, then Refresh");
+  }
+  return googleQuota(request.id, request.nowMs, token, "", "gemini-cli", "Gemini");
+}
+
+
+/** sqlite3 / python が無い環境用。生ファイルから `antigravityAuthStatus` の JSON を拾う。 */
+function scanAntigravityAuth(dbPath: string): string {
+  if (!existsSync(dbPath)) return "";
+  let text = "";
+  try {
+    text = readFileSync(dbPath, "utf8");
+  } catch {
+    return "";
+  }
+  const at = text.indexOf("antigravityAuthStatus");
+  if (at < 0) return "";
+  const end = at + 8000 < text.length ? at + 8000 : text.length;
+  return text.slice(at, end);
+}
+
+type AntigravityAuth = {
+  readonly token: string;
+  readonly email: string;
+};
+
+/** 1 つの state.vscdb からアプリの格納トークンを読む。sqlite3 / python 無しはバイトスキャンに落ちる。 */
+function readAntigravityStore(dbPath: string): AntigravityAuth {
+  const sql = "SELECT value FROM ItemTable WHERE key = 'antigravityAuthStatus' LIMIT 1;";
+  let text = sqliteQuery(dbPath, sql);
+  if (text.length === 0) text = scanAntigravityAuth(dbPath);
+  const token = jsonStringField(text, "apiKey");
+  if (token.length === 0) return { token: "", email: "" };
+  return { token: token, email: jsonStringField(text, "email") };
+}
+
+type LsBucket = {
+  bucketId?: string;
+  displayName?: string;
+  window?: string;
+  remainingFraction?: number;
+  resetTime?: string;
+};
+
+type LsGroup = {
+  displayName?: string;
+  buckets?: LsBucket[];
+};
+
+type LsQuota = {
+  response?: { groups?: LsGroup[] };
+};
+
+/** 起動中の Antigravity / Language Server を "ポート<TAB>csrfトークン" 行で列挙する。 */
+function languageServerEndpoints(): string {
+  if (platform() === "win32" || platform() === "windows") {
+    const ps =
+      "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '--csrf_token' } | ForEach-Object { " +
+      "$procId = $_.ProcessId; $parts = $_.CommandLine -split '--csrf_token'; " +
+      "$tok = ($parts[1].Trim() -split '\\s+')[0]; " +
+      "Get-NetTCPConnection -State Listen -OwningProcess $procId -ErrorAction SilentlyContinue | " +
+      "ForEach-Object { $_.LocalPort.ToString() + [char]9 + $tok } }";
+    return runTool("powershell", ["-NoProfile", "-NonInteractive", "-Command", ps], 9000);
+  }
+  if (platform() === "darwin") {
+    const sh =
+      "ps -ax -o pid=,command= | grep -- '--csrf_token' | grep -v grep | while read pid rest; do " +
+      "tok=$(echo \"$rest\" | sed -n 's/.*--csrf_token \\([^ ]*\\).*/\\1/p'); " +
+      "lsof -nP -iTCP -sTCP:LISTEN -a -p \"$pid\" 2>/dev/null | awk '{print $9}' | sed -n 's/.*:\\([0-9]*\\)$/\\1/p' | " +
+      "while read port; do printf '%s\\t%s\\n' \"$port\" \"$tok\"; done; done";
+    return runTool("/bin/sh", ["-c", sh], 9000);
+  }
+  const sh =
+    "ps -ax -o pid=,command= | grep -- '--csrf_token' | grep -v grep | while read pid rest; do " +
+    "tok=$(echo \"$rest\" | sed -n 's/.*--csrf_token \\([^ ]*\\).*/\\1/p'); " +
+    "ss -tlnp 2>/dev/null | grep \"pid=$pid,\" | sed -n 's/.*127.0.0.1:\\([0-9]*\\) .*/\\1/p' | " +
+    "while read port; do printf '%s\\t%s\\n' \"$port\" \"$tok\"; done; done";
+  return runTool("/bin/sh", ["-c", sh], 9000);
+}
+
+/** parseJson は LooseJson として実体化するので、別シェイプはここで読み直す。 */
+function parseLsQuota(text: string): LsQuota | null {
+  if (text.length === 0) return null;
+  try {
+    return JSON.parse(dropNullPairs(text)) as LsQuota;
+  } catch {
+    return null;
+  }
+}
+
+function groupShortName(displayName: string): string {
+  if (displayName.indexOf("Gemini") >= 0) return "Gemini";
+  if (displayName.indexOf("Claude") >= 0) return "Claude/GPT";
+  if (displayName.length > 0) return displayName;
+  return "Quota";
+}
+
+/** Antigravity の Language Server（IDE 起動中のみ）から枠を読む。 */
+function fetchAntigravityLocal(request: FetchOneRequest): FetchOneResult {
+  const rows = languageServerEndpoints();
+  if (rows.length === 0) return fail(request.id, request.nowMs, "not_found", "no-endpoints");
+  const lines = rows.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    i = i + 1;
+    if (line.length === 0) continue;
+    const tab = line.indexOf("\t");
+    const port = (tab >= 0 ? line.slice(0, tab) : line).trim();
+    const token = tab >= 0 ? line.slice(tab + 1).trim() : "";
+    if (port.length < 2 || token.length === 0) continue;
+    const res = http(
+      "POST",
+      "http://127.0.0.1:" + port + "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
+      ["Content-Type: application/json", "Accept: application/json", "Connect-Protocol-Version: 1", "X-Codeium-Csrf-Token: " + token],
+      "{}",
+    );
+    if (res.status !== 200) continue;
+    const parsed = parseLsQuota(res.body);
+    if (parsed == null) continue;
+    const groups = parsed.response != null ? parsed.response.groups : undefined;
+    if (groups == null) continue;
+    const windows: QuotaWindow[] = [];
+    let g = 0;
+    while (g < groups.length && windows.length < 4) {
+      const group = groups[g];
+      const short = groupShortName(group.displayName ?? "");
+      const buckets = group.buckets;
+      if (buckets != null) {
+        let b = 0;
+        while (b < buckets.length && windows.length < 4) {
+          const bucket = buckets[b];
+          const remaining = bucket.remainingFraction;
+          if (remaining != null && remaining === remaining) {
+            const used = clampPercent((1 - remaining) * 100);
+            const win = bucket.window ?? "";
+            const label = win === "weekly" ? "Weekly" : win === "5h" ? "Session" : win.length > 0 ? win : "Limit";
+            const reset = bucket.resetTime != null ? parseTimeMs(bucket.resetTime) : 0;
+            windows.push(bar(windows.length + 1, short + " " + label, used, reset));
+          }
+          b = b + 1;
+        }
+      }
+      g = g + 1;
+    }
+    if (windows.length > 0) {
+      return okResult(request.id, request.nowMs, "antigravity-app", "Google", windows);
+    }
+  }
+  return fail(request.id, request.nowMs, "not_found", "no-quota");
 }
 
 function fetchAntigravity(request: FetchOneRequest): FetchOneResult {
-  try {
-    const out = execFileSync("agy", ["-p", "/usage", "--output-format", "json"], {
-      encoding: "utf8",
-      timeout: 20000,
-      maxBuffer: 1024 * 1024,
-    });
-    const json = parseJson(out);
-    if (json != null) {
-      const windows: QuotaWindow[] = [];
-      const weekly = percentFromWindow(json.weekly ?? json.weeklyUsage);
-      if (weekly >= 0) windows.push(bar(1, "Weekly", weekly, resetMsFromWindow(json.weekly ?? json.weeklyUsage, request.nowMs)));
-      const session = percentFromWindow(json.five_hour ?? json.rolling);
-      if (session >= 0) windows.push(bar(2, "Session", session, resetMsFromWindow(json.five_hour ?? json.rolling, request.nowMs)));
-      if (windows.length > 0) {
-        return okResult(request.id, request.nowMs, "agy", "Google", windows);
+  const local = fetchAntigravityLocal(request);
+  if (local.ok) return local;
+  const dbs = pathsFor("antigravity_db");
+  let sawToken = false;
+  let rejectedText = "";
+  let d = 0;
+  while (d < dbs.length) {
+    if (existsSync(dbs[d])) {
+      const store = readAntigravityStore(dbs[d]);
+      if (store.token.length > 0) {
+        sawToken = true;
+        const account = store.email.length > 0 ? store.email : "antigravity-app";
+        const viaApp = googleQuota(request.id, request.nowMs, store.token, "ANTIGRAVITY", account, "Google");
+        if (viaApp.ok) return viaApp;
+        if (viaApp.errorKind === "migrated") return viaApp;
+        rejectedText = decodeBytes(viaApp.errorText);
       }
     }
-  } catch {
-    // agy が無いときは Gemini OAuth と同じ枠を読む
+    d = d + 1;
   }
   const gemini = fetchGemini({
     id: "gemini",
@@ -1194,11 +1580,26 @@ function fetchAntigravity(request: FetchOneRequest): FetchOneResult {
       fetchedAtMs: request.nowMs,
     };
   }
-  if (gemini.errorKind === "migrated") {
-    return fail(request.id, request.nowMs, "not_found", "Install agy, or sign in with Gemini CLI, then Refresh");
+  const antigravityHint = "Open Antigravity. Its language server answers the quota locally";
+  const localReason = decodeBytes(local.errorText);
+  if (localReason === "no-endpoints") {
+    return fail(
+      request.id,
+      request.nowMs,
+      "auth",
+      "Antigravity is not running. Launch it, then Refresh. Its language server answers the quota locally",
+    );
   }
-  if (gemini.errorKind === "not_found") {
-    return fail(request.id, request.nowMs, "not_found", "Install agy, or sign in with Gemini CLI, then Refresh");
+  if (sawToken) {
+    return fail(
+      request.id,
+      request.nowMs,
+      "auth",
+      "Antigravity app token rejected (" + rejectedText + "). " + antigravityHint,
+    );
+  }
+  if (gemini.errorKind === "migrated" || gemini.errorKind === "not_found") {
+    return fail(request.id, request.nowMs, "not_found", antigravityHint);
   }
   return fail(request.id, request.nowMs, gemini.errorKind, decodeBytes(gemini.errorText));
 }

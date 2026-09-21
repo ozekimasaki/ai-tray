@@ -206,11 +206,32 @@ function geminiPaths(): string[] {
   const out: string[] = [];
   const home = homePath();
   pushUnique(out, join(home, ".gemini", "oauth_creds.json"));
+  // Gemini CLI 本体の creds。agy はここを書き換えないので、ログインしていても期限切れのことがある。
+  pushUnique(out, join(home, ".gemini", "antigravity-cli", "oauth_creds.json"));
+  pushUnique(out, join(home, ".gemini", "antigravity", "oauth_creds.json"));
   if (looksWindows()) {
     pushUnique(out, join(roamingRoot(), "gemini", "oauth_creds.json"));
   }
   return out;
 }
+
+/** Antigravity デスクトップアプリの state.vscdb。`antigravityAuthStatus` に ya29 トークンが入る。 */
+function antigravityDbPaths(): string[] {
+  const out: string[] = [];
+  const home = homePath();
+  const apps = ["Antigravity", "Antigravity IDE"];
+  let a = 0;
+  while (a < apps.length) {
+    pushUnique(out, join(roamingRoot(), apps[a], "User", "globalStorage", "state.vscdb"));
+    pushUnique(out, join(localRoot(), apps[a], "User", "globalStorage", "state.vscdb"));
+    pushUnique(out, join(home, "AppData", "Roaming", apps[a], "User", "globalStorage", "state.vscdb"));
+    pushUnique(out, join(darwinSupport(), apps[a], "User", "globalStorage", "state.vscdb"));
+    pushUnique(out, join(xdgConfig(), apps[a], "User", "globalStorage", "state.vscdb"));
+    a = a + 1;
+  }
+  return out;
+}
+
 
 function candidates(kind: PathKind): string[] {
   if (kind === "claude") return claudeCliPaths();
@@ -218,6 +239,7 @@ function candidates(kind: PathKind): string[] {
   if (kind === "codex") return codexPaths();
   if (kind === "cursor") return cursorDbPaths();
   if (kind === "cursor_agent") return cursorAgentPaths();
+  if (kind === "antigravity_db") return antigravityDbPaths();
   return geminiPaths();
 }
 

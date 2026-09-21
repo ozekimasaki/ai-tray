@@ -63,17 +63,19 @@
                         <column grow="{b.leftPercent}" height="10" background="surface"/>
                       </if>
                     </row>
-                    <if test="{b.tone == 'destructive'}">
-                      <text foreground="destructive">{b.resetLabel}</text>
-                    </if>
-                    <else>
-                      <if test="{b.tone == 'warning'}">
-                        <text foreground="warning">{b.resetLabel}</text>
+                    <if test="{b.hasReset}">
+                      <if test="{b.tone == 'destructive'}">
+                        <text foreground="destructive">{b.resetLabel}</text>
                       </if>
                       <else>
-                        <text foreground="text_muted">{b.resetLabel}</text>
+                        <if test="{b.tone == 'warning'}">
+                          <text foreground="warning">{b.resetLabel}</text>
+                        </if>
+                        <else>
+                          <text foreground="text_muted">{b.resetLabel}</text>
+                        </else>
                       </else>
-                    </else>
+                    </if>
                   </else>
                 </column>
               </if>

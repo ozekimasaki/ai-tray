@@ -73,6 +73,7 @@
                 "zero://app",
                 "zero://inline",
                 "https://api.anthropic.com",
+                "https://console.anthropic.com",
                 "https://claude.ai",
                 "https://chatgpt.com",
                 "https://cursor.com",

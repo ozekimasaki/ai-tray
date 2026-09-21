@@ -248,7 +248,7 @@ function missingHint(id: ProviderId): Uint8Array {
     case "cursor":
       return asciiBytes("Sign in to the Cursor app, or paste a cursor.com cookie");
     case "antigravity":
-      return asciiBytes("Install agy, or sign in with Gemini CLI, then Refresh");
+      return asciiBytes("Open the Antigravity app and sign in, then Refresh");
     case "gemini":
       return asciiBytes("Sign in with Gemini CLI, then Refresh");
     case "opencode":
@@ -265,13 +265,13 @@ function missingHint(id: ProviderId): Uint8Array {
 function settingsHint(id: ProviderId): Uint8Array {
   switch (id) {
     case "claude":
-      return asciiBytes("Reads Claude app config or ~/.claude/.credentials.json. Optional session key in the secret field.");
+      return asciiBytes("Reads Claude app config or ~/.claude/.credentials.json (skips an expired CLI token). Optional session key in the secret field.");
     case "codex":
       return asciiBytes("Reads ~/.codex/auth.json or $CODEX_HOME/auth.json.");
     case "cursor":
       return asciiBytes("Reads Cursor state.vscdb (no sqlite3 required), cursor-agent auth.json, or a WorkosCursorSessionToken cookie.");
     case "antigravity":
-      return asciiBytes("Runs agy -p /usage, then Gemini OAuth quota.");
+      return asciiBytes("Asks the running Antigravity app over its local language server, then the app token in state.vscdb, then Gemini OAuth.");
     case "gemini":
       return asciiBytes("Reads ~/.gemini/oauth_creds.json. Consumer OAuth may have moved to Antigravity.");
     case "opencode":
@@ -362,6 +362,7 @@ function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBa
         usedFraction: 0,
         leftLabel: creditsLabel(remaining),
         resetLabel: asciiBytes("No reset"),
+        hasReset: true,
         tone: countTone(remaining),
         isCount: true,
         remaining: remaining,
@@ -377,6 +378,7 @@ function toBars(nowMs: number, windows: readonly QuotaWindow[]): readonly CardBa
         usedFraction: permilleFraction(used * 10),
         leftLabel: leftLabel(used),
         resetLabel: formatReset(nowMs, w.resetsAtMs),
+        hasReset: w.resetsAtMs > 0,
         tone: barTone(used),
         isCount: false,
         remaining: 0,
@@ -438,6 +440,7 @@ export function visibleBars(model: Model): readonly FlatBar[] {
         usedFraction: b.usedFraction,
         leftLabel: b.leftLabel,
         resetLabel: b.resetLabel,
+        hasReset: b.hasReset,
         tone: b.tone,
         isCount: b.isCount,
         remaining: remaining,

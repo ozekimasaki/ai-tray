@@ -23,7 +23,14 @@ export type ErrorKind = "none" | "auth" | "network" | "not_found" | "migrated" |
 export type AlibabaRegion = "intl" | "cn";
 
 /** サービスが読むローカル資格情報ファイル。 desktop / agent は Windows を含む複数候補。 */
-export type PathKind = "claude" | "claude_desktop" | "codex" | "cursor" | "cursor_agent" | "gemini";
+export type PathKind =
+  | "claude"
+  | "claude_desktop"
+  | "codex"
+  | "cursor"
+  | "cursor_agent"
+  | "antigravity_db"
+  | "gemini";
 
 export type PathRequest = {
   readonly kind: PathKind;
@@ -104,6 +111,7 @@ export interface CardBar {
   readonly usedFraction: number;
   readonly leftLabel: Uint8Array;
   readonly resetLabel: Uint8Array;
+  readonly hasReset: boolean;
   readonly tone: QuotaTone;
   readonly isCount: boolean;
   readonly remaining: number;
@@ -119,6 +127,7 @@ export interface FlatBar {
   readonly usedFraction: number;
   readonly leftLabel: Uint8Array;
   readonly resetLabel: Uint8Array;
+  readonly hasReset: boolean;
   readonly tone: QuotaTone;
   readonly isCount: boolean;
   readonly remaining: number;
