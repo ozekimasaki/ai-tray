@@ -1,8 +1,0 @@
-<!-- パネル見出し。× は compact 二次 GPU を破棄する。終了はトレイか Settings。 -->
-<template name="title-bar" args="heading">
-  <row window-drag="true" gap="4" cross="center">
-    <text grow="1"><span weight="medium">{heading}</span></text>
-    <button size="sm" variant="ghost" icon="settings" on-press="open_settings" label="Settings"></button>
-    <button size="sm" variant="ghost" icon="x" on-press="hide_compact" label="Close"></button>
-  </row>
-</template>

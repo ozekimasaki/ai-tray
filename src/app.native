@@ -1,2 +1,0 @@
-<!-- 起動時 GPU ホスト。常に initially_hidden。パネルは windows/compact.native。 -->
-<column grow="1"></column>

@@ -1,5 +1,6 @@
+/target
+/node_modules
 .native/
 zig-out/
 .zig-cache/
-node_modules/
 agent-tools/
